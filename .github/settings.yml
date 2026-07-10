@@ -1,0 +1,50 @@
+# Repository settings, synced by the Probot "Settings" app from the default
+# branch. See https://probot.github.io/apps/settings/. Only takes effect once
+# that app is installed on the repo. All keys are optional.
+#
+# Scope here is deliberately minimal: merge hygiene, labels, and repo metadata.
+# No branch protection (managed elsewhere if needed).
+
+repository:
+  name: play
+  description: Slowtide, a bedtime wind-down PWA whose hidden arousal budget decays over a parent-set session.
+  homepage: https://play.slowtide.app
+  default_branch: main
+
+  has_issues: true
+  has_projects: false
+  has_wiki: false
+  has_downloads: false
+
+  # Squash-only, to keep a linear history that matches Conventional Commits.
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+
+  # Tidy up merged branches automatically.
+  delete_branch_on_merge: true
+
+# Label set aligned to the Conventional Commit types used in this repo,
+# plus a few general-purpose labels.
+labels:
+  - name: feat
+    color: 0e8a16
+    description: A new feature
+  - name: fix
+    color: d73a4a
+    description: A bug fix
+  - name: docs
+    color: 0075ca
+    description: Documentation only
+  - name: test
+    color: fbca04
+    description: Tests only
+  - name: chore
+    color: cfd3d7
+    description: Tooling, deps, or housekeeping
+  - name: bug
+    color: b60205
+    description: Something is not working
+  - name: question
+    color: d876e3
+    description: Further information is requested
