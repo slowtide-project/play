@@ -12,8 +12,11 @@
  * Everything reads its pace and light from the budget (FR-8, FR-24): the auto
  * amble, the sway, and all motion slow and stop as the session winds down,
  * while the whole scene drifts from hazy day, through sunset, to moonlit night.
- * Forward motion is deliberately slow and gentle, and honours reduced motion,
- * since optical flow toward the viewer must never be over-stimulating (NFR-5).
+ * Forward motion is deliberately slow and gentle. Under reduced motion the
+ * decorative motion (sway, walking bob, lantern flicker, drifting motes) is
+ * dropped, but the forward amble continues at a calmer pace: a fully still
+ * scene reads as broken and hides the intended action, so the gentle journey
+ * stays while the twitchy, over-stimulating motion goes (NFR-5, ADR 0005).
  */
 
 import type { Toy, ToyFrame, ToyPointer } from "../render/index.js";
@@ -60,6 +63,9 @@ const TREE_H = 2.6;
 const TREE_DENSITY = 0.85;
 /** Gentle self-propelled forward amble, world units per second at full budget. */
 const AUTO_WALK = 0.25;
+/** Fraction of the amble kept under reduced motion: the forward journey stays,
+ * only calmer, so the intended action still reads (NFR-5, ADR 0005). */
+const REDUCED_MOTION_WALK = 0.5;
 /** How far a vertical drag walks, world units per pixel. */
 const WALK_PER_PX = 0.02;
 
@@ -794,7 +800,10 @@ export function createForestWorld(): Toy {
     const speed = frame.reducedMotion ? 0 : frame.levers.animationSpeed;
     const dts = frame.dt / 1000;
     // Gentle self-propelled amble forward, slowing to nothing as it winds down.
-    camDepth += AUTO_WALK * speed * dts;
+    // The forward walk is the scene's core action, so it continues even under
+    // reduced motion (at a calmer pace); only the decorative motion stops there.
+    const walkSpeed = frame.levers.animationSpeed * (frame.reducedMotion ? REDUCED_MOTION_WALK : 1);
+    camDepth += AUTO_WALK * walkSpeed * dts;
     // Inertia from the last drag.
     if (!pressed) {
       camX += velX;
