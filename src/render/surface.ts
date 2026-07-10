@@ -51,6 +51,7 @@ export function mountSurface(
   engine: Engine,
   now: () => number,
   toy: Toy,
+  onActiveChange?: (active: boolean) => void,
 ): SurfaceController {
   const canvas = document.createElement("canvas");
   Object.assign(canvas.style, {
@@ -166,6 +167,7 @@ export function mountSurface(
       toyReady = true;
     }
     startLoop();
+    onActiveChange?.(true);
   }
 
   function deactivate(): void {
@@ -173,6 +175,7 @@ export function mountSurface(
     toyReady = false;
     pressed = false;
     drawRest();
+    onActiveChange?.(false);
   }
 
   function toPointer(event: PointerEvent, type: ToyPointer["type"]): ToyPointer {
@@ -231,8 +234,12 @@ export function mountSurface(
 
   resize();
   // Resolve the launch surface: resume an in-flight session, else rest quiet.
-  if (state.status === "active") activate(true);
-  else drawRest();
+  if (state.status === "active") {
+    activate(true);
+  } else {
+    drawRest();
+    onActiveChange?.(false);
+  }
 
   return {
     sync: syncNow,

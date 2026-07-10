@@ -22,7 +22,7 @@ import { createParentDefaultsStore } from "./platform/parent-defaults-store.js";
 import { applyDefaults, defaultsFromSetup } from "./parent/parent-defaults.js";
 import { openParentEntry } from "./parent/index.js";
 import { DEFAULT_SETUP, toSessionConfig } from "./parent/setup-config.js";
-import { mountSurface } from "./render/index.js";
+import { mountSurface, type SurfaceController } from "./render/index.js";
 import { createToyBox } from "./toys/index.js";
 
 /** How long the corner must be held to reveal the parent gate, in ms (FR-29). */
@@ -35,8 +35,9 @@ const app = document.getElementById("app");
 
 // The render surface owns the canvas and the loop. It resolves the launch
 // surface itself (resuming an in-flight session or resting quiet), so the app
-// never auto-starts one (FR-1b, FR-6).
-const surface = app === null ? null : mountSurface(app, engine, () => Date.now(), createToyBox());
+// never auto-starts one (FR-1b, FR-6). Assigned below, once the parent cue
+// exists, so the surface can show/hide the cue as the session begins and ends.
+let surface: SurfaceController | null = null;
 
 let entryOpen = false;
 
@@ -62,47 +63,192 @@ async function openEntry(): Promise<void> {
   }
 }
 
+interface HoldCue {
+  /** Show the parent cue (rest surface) or hide it (during an active session). */
+  setResting(resting: boolean): void;
+}
+
 /**
  * A press-and-hold target in the top-right corner. Holding it steadily for
  * {@link HOLD_TO_REVEAL_MS} opens the parent gate; a tap or a wandering finger
  * does nothing, keeping it out of a child's reach (FR-29). It sits opposite the
  * child's home button, which lives in the top-left.
+ *
+ * On the rest surface it carries a faint, parent-only cue: a dim ring that
+ * fills as the corner is held, next to a low-contrast "hold to begin" hint, so
+ * an adult can find the way in on a first launch instead of facing a blank
+ * screen. The cue is deliberately quiet and non-playful, and is hidden entirely
+ * during an active session, so the child is never shown anything that invites
+ * play or reveals the wind-down (FR-7, NFR-1). The filling ring reflects the
+ * hold gesture only, never session progress.
  */
-function mountHoldTarget(): void {
+function mountHoldTarget(): HoldCue {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const reduceMotion = (() => {
+    try {
+      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      return false;
+    }
+  })();
+
   const target = document.createElement("div");
   target.setAttribute("aria-hidden", "true");
   Object.assign(target.style, {
     position: "fixed",
     top: "0",
     right: "0",
-    width: "72px",
-    height: "72px",
+    width: "168px",
+    height: "96px",
     zIndex: "10",
     touchAction: "none",
     background: "transparent",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingRight: "18px",
+    boxSizing: "border-box",
+    cursor: "pointer",
   } satisfies Partial<CSSStyleDeclaration>);
 
+  // The cue itself. Non-interactive (the whole target is the hit area) and very
+  // low-contrast, so it reads as a quiet adult handle, not a toy.
+  const cue = document.createElement("div");
+  Object.assign(cue.style, {
+    display: "flex",
+    alignItems: "center",
+    gap: "9px",
+    opacity: "0",
+    transition: "opacity 700ms ease",
+    pointerEvents: "none",
+    userSelect: "none",
+  } satisfies Partial<CSSStyleDeclaration>);
+
+  const hint = document.createElement("span");
+  hint.textContent = "hold to begin";
+  Object.assign(hint.style, {
+    color: "rgba(231,236,245,0.32)",
+    font: "500 12px/1 ui-sans-serif, system-ui, -apple-system, sans-serif",
+    letterSpacing: "0.04em",
+    whiteSpace: "nowrap",
+  } satisfies Partial<CSSStyleDeclaration>);
+
+  const R = 16;
+  const CIRC = 2 * Math.PI * R;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "40");
+  svg.setAttribute("height", "40");
+  svg.setAttribute("viewBox", "0 0 44 44");
+  const base = document.createElementNS(SVG_NS, "circle");
+  const arc = document.createElementNS(SVG_NS, "circle");
+  for (const ring of [base, arc]) {
+    ring.setAttribute("cx", "22");
+    ring.setAttribute("cy", "22");
+    ring.setAttribute("r", String(R));
+    ring.setAttribute("fill", "none");
+    ring.setAttribute("stroke-width", "2");
+    ring.setAttribute("stroke-linecap", "round");
+  }
+  base.setAttribute("stroke", "rgba(231,236,245,0.16)");
+  arc.setAttribute("stroke", "rgba(231,236,245,0.72)");
+  arc.setAttribute("stroke-dasharray", String(CIRC));
+  arc.setAttribute("stroke-dashoffset", String(CIRC));
+  arc.setAttribute("transform", "rotate(-90 22 22)");
+  const dot = document.createElementNS(SVG_NS, "circle");
+  dot.setAttribute("cx", "22");
+  dot.setAttribute("cy", "22");
+  dot.setAttribute("r", "2.5");
+  dot.setAttribute("fill", "rgba(231,236,245,0.5)");
+  svg.append(base, arc, dot);
+
+  cue.append(hint, svg);
+  target.append(cue);
+  document.body.append(target);
+
+  let resting = false;
+
+  // A slow breath so a resting parent's eye finds the handle; skipped under
+  // reduced motion. Idle affordance only, never session progress (NFR-1).
+  let pulse: Animation | null = null;
+  const startPulse = (): void => {
+    if (reduceMotion || pulse !== null || !resting) return;
+    pulse = cue.animate([{ opacity: 0.55 }, { opacity: 1 }, { opacity: 0.55 }], {
+      duration: 3800,
+      iterations: Infinity,
+      easing: "ease-in-out",
+    });
+  };
+  const stopPulse = (): void => {
+    pulse?.cancel();
+    pulse = null;
+  };
+
   let holdTimer = 0;
+  let fill: Animation | null = null;
+  const resetArc = (): void => {
+    fill?.cancel();
+    fill = null;
+    arc.setAttribute("stroke-dashoffset", String(CIRC));
+  };
   const cancel = (): void => {
     if (holdTimer !== 0) {
       window.clearTimeout(holdTimer);
       holdTimer = 0;
     }
+    resetArc();
+    if (resting) startPulse();
   };
+
   target.addEventListener("pointerdown", () => {
-    cancel();
+    if (holdTimer !== 0) return;
+    stopPulse();
+    if (!reduceMotion) {
+      cue.style.opacity = "1";
+      fill = arc.animate([{ strokeDashoffset: CIRC }, { strokeDashoffset: 0 }], {
+        duration: HOLD_TO_REVEAL_MS,
+        easing: "linear",
+        fill: "forwards",
+      });
+    }
     holdTimer = window.setTimeout(() => {
       holdTimer = 0;
+      resetArc();
       void openEntry();
     }, HOLD_TO_REVEAL_MS);
   });
   for (const event of ["pointerup", "pointerleave", "pointercancel"] as const) {
     target.addEventListener(event, cancel);
   }
-  document.body.append(target);
+
+  return {
+    setResting(next: boolean): void {
+      resting = next;
+      cue.style.opacity = next ? "1" : "0";
+      if (next) {
+        startPulse();
+      } else {
+        stopPulse();
+        cancel();
+      }
+    },
+  };
 }
 
-mountHoldTarget();
+const holdCue = mountHoldTarget();
+
+// Wire the surface now that the cue exists: the surface reports when it enters
+// or leaves an active session (including a natural end when the duration
+// elapses), and the parent cue follows, showing only on the rest surface.
+surface =
+  app === null
+    ? null
+    : mountSurface(
+        app,
+        engine,
+        () => Date.now(),
+        createToyBox(),
+        (active) => holdCue.setResting(!active),
+      );
 
 // Developer-only conveniences. All gated on `__SLOWTIDE_DEV_TOOLS__`, a
 // compile-time constant (see vite.config.ts) that is true under the Vite dev
@@ -112,9 +258,12 @@ mountHoldTarget();
 // Shipped production still rests neutral until the parent gate (FR-1b); it never
 // auto-starts. A preview build deliberately does auto-start, for inspection only.
 if (__SLOWTIDE_DEV_TOOLS__ && surface !== null) {
+  // `surface` is a mutable binding, so capture the non-null value for the button
+  // callbacks below (which would otherwise see it as possibly null).
+  const surf = surface;
   // Default straight into the forest so there is no dev dance to see the scene.
   engine.startSession(toSessionConfig(DEFAULT_SETUP), Date.now());
-  surface.restart();
+  surf.restart();
 
   const styleBtn = (b: HTMLButtonElement): void => {
     Object.assign(b.style, {
@@ -145,10 +294,10 @@ if (__SLOWTIDE_DEV_TOOLS__ && surface !== null) {
   };
   // Preview the scene at different times of day (the real clock drives it by
   // default; these pin it for inspection). "Now" returns to the real clock.
-  addBtn("Now", () => surface.setTimeOfDayOverride(null));
-  addBtn("Day", () => surface.setTimeOfDayOverride(0.9));
-  addBtn("Dusk", () => surface.setTimeOfDayOverride(0.4));
-  addBtn("Night", () => surface.setTimeOfDayOverride(0.05));
+  addBtn("Now", () => surf.setTimeOfDayOverride(null));
+  addBtn("Day", () => surf.setTimeOfDayOverride(0.9));
+  addBtn("Dusk", () => surf.setTimeOfDayOverride(0.4));
+  addBtn("Night", () => surf.setTimeOfDayOverride(0.05));
   // Single toggle for the engine tuner: opens it, and closes it again.
   let teardownDev: (() => void) | null = null;
   const engineBtn = document.createElement("button");
