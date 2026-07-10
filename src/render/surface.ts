@@ -17,6 +17,7 @@
 import type { Engine } from "../engine/index.js";
 import {
   BUDGET_SAMPLE_MS,
+  clampDevicePixelRatio,
   clampFrameDelta,
   daylightAtEpoch,
   targetFrameInterval,
@@ -30,6 +31,12 @@ export interface SurfaceController {
   restart(): void;
   /** Dev-only: pin the scene's time-of-day (0..1), or null for the real clock. */
   setTimeOfDayOverride(value: number | null): void;
+  /**
+   * Dev-only: the recent median toy draw time and the current frame-rate cap, or
+   * null when the meter is off (production). The dev toolbar renders this; it is
+   * never painted on the child-facing surface (NFR-1).
+   */
+  frameStats(): { drawMs: number; capFps: number } | null;
   destroy(): void;
 }
 
@@ -52,6 +59,7 @@ export function mountSurface(
   now: () => number,
   toy: Toy,
   onActiveChange?: (active: boolean) => void,
+  meterEnabled?: boolean,
 ): SurfaceController {
   const canvas = document.createElement("canvas");
   Object.assign(canvas.style, {
@@ -76,9 +84,23 @@ export function mountSurface(
   let state = engine.getState(mountWall);
   let pressed = false;
   let timeOfDayOverride: number | null = null;
+  let deviceRatio = 1;
+
+  // Developer-only frame-time meter. Enabled by the caller (the composition root
+  // passes the resolved dev-mode state, which covers both the preview build and
+  // the runtime unlock on the deployed site); otherwise it falls back to the
+  // compile-time flag. It only records timings — the readout is rendered by the
+  // dev toolbar, never on the child-facing surface (NFR-1).
+  const devMeter =
+    meterEnabled ?? (typeof __SLOWTIDE_DEV_TOOLS__ !== "undefined" && __SLOWTIDE_DEV_TOOLS__);
+  const perfSamples: number[] = [];
+  function perfNow(): number {
+    return typeof performance !== "undefined" ? performance.now() : now();
+  }
 
   function resize(): void {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = clampDevicePixelRatio(window.devicePixelRatio || 1);
+    deviceRatio = dpr;
     const rect = host.getBoundingClientRect();
     width = Math.max(1, Math.round(rect.width));
     height = Math.max(1, Math.round(rect.height));
@@ -112,6 +134,7 @@ export function mountSurface(
     if (ctx === null) return;
     const dt = clampFrameDelta(lastDrawTs === 0 ? 0 : ts - lastDrawTs);
     lastDrawTs = ts;
+    const drawStart = devMeter ? perfNow() : 0;
     toy.draw({
       ctx,
       width,
@@ -123,7 +146,21 @@ export function mountSurface(
       timeOfDay: timeOfDayOverride ?? daylightAtEpoch(now()),
       phase: state.phase,
       reducedMotion: prefersReducedMotion(),
+      dpr: deviceRatio,
     });
+    if (devMeter) {
+      perfSamples.push(perfNow() - drawStart);
+      if (perfSamples.length > 60) perfSamples.shift();
+    }
+  }
+
+  /** Dev-only: recent median draw time and the current fps cap, for the toolbar. */
+  function frameStats(): { drawMs: number; capFps: number } | null {
+    if (!devMeter || perfSamples.length === 0) return null;
+    const sorted = [...perfSamples].sort((a, b) => a - b);
+    const drawMs = sorted[sorted.length >> 1] ?? 0;
+    const capFps = Math.round(1000 / targetFrameInterval(state.levers.animationSpeed));
+    return { drawMs, capFps };
   }
 
   function loop(ts: number): void {
@@ -247,6 +284,7 @@ export function mountSurface(
     setTimeOfDayOverride(value: number | null) {
       timeOfDayOverride = value;
     },
+    frameStats,
     destroy() {
       stopLoop();
       canvas.removeEventListener("pointerdown", onPointerDown);

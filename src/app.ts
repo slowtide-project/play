@@ -24,6 +24,13 @@ import { openParentEntry } from "./parent/index.js";
 import { DEFAULT_SETUP, toSessionConfig } from "./parent/setup-config.js";
 import { mountSurface, type SurfaceController } from "./render/index.js";
 import { createToyBox } from "./toys/index.js";
+import { isPreviewBuild, resolveDevMode } from "./platform/dev-mode.js";
+
+// Whether the developer tools are active this launch: the compile-time preview
+// flag, or the hidden runtime unlock (`?dev=on`) on the deployed build. Resolved
+// once here, the single composition root, and threaded to the surface and the
+// toolbar below (see ./platform/dev-mode).
+const devTools = resolveDevMode();
 
 /** How long the corner must be held to reveal the parent gate, in ms (FR-29). */
 const HOLD_TO_REVEAL_MS = 3000;
@@ -259,22 +266,29 @@ surface =
         () => Date.now(),
         createToyBox(),
         (active) => holdCue.setResting(!active),
+        devTools,
       );
 
-// Developer-only conveniences. All gated on `__SLOWTIDE_DEV_TOOLS__`, a
-// compile-time constant (see vite.config.ts) that is true under the Vite dev
-// server, and also in a preview build made with SLOWTIDE_PREVIEW=1. In a normal
-// production build it is baked to `false`, so this whole block — and the src/dev
-// module behind it — is tree-shaken out and can never reach the child surface.
-// Shipped production still rests neutral until the parent gate (FR-1b); it never
-// auto-starts. A preview build deliberately does auto-start, for inspection only.
-if (__SLOWTIDE_DEV_TOOLS__ && surface !== null) {
+// Developer-only conveniences. Active when `devTools` is true: either the
+// compile-time preview flag (Vite dev server or a SLOWTIDE_PREVIEW=1 build) or
+// the hidden runtime unlock on the deployed site (`?dev=on`). By default on the
+// deployed build `devTools` is false, so this whole block is inert and the app
+// rests neutral until the parent gate (FR-1b).
+//
+// Auto-start into the forest is a *local inspection* convenience only and stays
+// behind the compile-time flag alone: it must never happen on a deployed/child
+// device, so unlocking dev tools at runtime gives the toolbar and readout but
+// still leaves the app resting neutral behind the parent gate (FR-1b).
+if (devTools && surface !== null) {
   // `surface` is a mutable binding, so capture the non-null value for the button
   // callbacks below (which would otherwise see it as possibly null).
   const surf = surface;
-  // Default straight into the forest so there is no dev dance to see the scene.
-  engine.startSession(toSessionConfig(DEFAULT_SETUP), Date.now());
-  surf.restart();
+  if (isPreviewBuild()) {
+    // Preview build only: drop straight into the forest so there is no dev dance
+    // to see the scene. Never on the deployed build (FR-1b).
+    engine.startSession(toSessionConfig(DEFAULT_SETUP), Date.now());
+    surf.restart();
+  }
 
   const styleBtn = (b: HTMLButtonElement): void => {
     Object.assign(b.style, {
@@ -330,5 +344,24 @@ if (__SLOWTIDE_DEV_TOOLS__ && surface !== null) {
     });
   });
   bar.append(engineBtn);
+
+  // A live frame-time readout, measured in the surface loop and polled here, so
+  // the true forest render cost can be read on a real device via the preview
+  // build. Text only, inside the dev toolbar, never on the child surface.
+  const stats = document.createElement("span");
+  Object.assign(stats.style, {
+    alignSelf: "center",
+    marginLeft: "4px",
+    minWidth: "148px",
+    color: "#8ff0c8",
+    font: "12px ui-monospace, monospace",
+  } satisfies Partial<CSSStyleDeclaration>);
+  bar.append(stats);
+  window.setInterval(() => {
+    const s = surf.frameStats();
+    stats.textContent =
+      s === null ? "measuring…" : `draw ${s.drawMs.toFixed(1)}ms · cap ${s.capFps}fps`;
+  }, 400);
+
   document.body.append(bar);
 }

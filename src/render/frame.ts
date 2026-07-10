@@ -13,12 +13,31 @@
 /** How often the budget is resampled from the engine, in milliseconds. */
 export const BUDGET_SAMPLE_MS = 1000;
 
-/** Frames per second at the calmest (budget ~0) and liveliest (budget 1). */
+/** Frames per second at the calmest (budget ~0) and liveliest (budget 1).
+ *
+ * The ceiling is deliberately below the display's 60Hz: the scene is soft and
+ * drifting, so 40fps reads smoothly even at the liveliest, while cutting the
+ * per-second render (and therefore heat and battery) most in the busy Engage
+ * phase where the animation-speed lever is near 1 (NFR-12). */
 export const MIN_FPS = 6;
-export const MAX_FPS = 60;
+export const MAX_FPS = 40;
 
 /** Largest per-frame delta we hand a toy, so a paused tab cannot jump it. */
 export const MAX_FRAME_DELTA_MS = 100;
+
+/**
+ * Largest device-pixel-ratio we render the canvas at. Retina iPads report 2 (or
+ * more); the muted, low-contrast art does not need every backing pixel, and the
+ * fill-rate saving from capping is large on an older GPU, which then shades far
+ * fewer pixels per frame (NFR-12). Below this, the raw ratio is honoured.
+ */
+export const MAX_DEVICE_PIXEL_RATIO = 1.5;
+
+/** Clamp a raw device-pixel-ratio into the range we actually render at. */
+export function clampDevicePixelRatio(raw: number): number {
+  if (!Number.isFinite(raw) || raw < 1) return 1;
+  return Math.min(raw, MAX_DEVICE_PIXEL_RATIO);
+}
 
 function clamp01(value: number): number {
   if (!Number.isFinite(value) || value < 0) return 0;

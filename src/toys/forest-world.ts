@@ -79,6 +79,40 @@ const DAPPLE_FAR = 9;
 /** Drifting motes in the air. */
 const MOTE_COUNT = 26;
 
+/**
+ * A soft warm glow, pre-rendered once into an offscreen canvas so the many
+ * fireflies and night motes can be drawn with a cheap {@link CanvasRenderingContext2D.drawImage}
+ * blit instead of a per-particle `shadowBlur`. Canvas shadow blur is one of the
+ * most expensive 2D operations and was being paid once per particle per frame;
+ * a cached sprite gives the same look for a fraction of the cost (NFR-12).
+ *
+ * Built lazily and cached. Returns null where no canvas is available (e.g. the
+ * headless test environment), so callers fall back to the direct blur path.
+ */
+let glowSprite: HTMLCanvasElement | null = null;
+let glowSpriteTried = false;
+
+function getGlowSprite(): HTMLCanvasElement | null {
+  if (glowSpriteTried) return glowSprite;
+  glowSpriteTried = true;
+  if (typeof document === "undefined") return glowSprite;
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const g = canvas.getContext("2d");
+  if (g === null) return glowSprite;
+  const r = size / 2;
+  const grad = g.createRadialGradient(r, r, 0, r, r, r);
+  grad.addColorStop(0, "rgba(255,230,150,1)");
+  grad.addColorStop(0.4, "rgba(255,226,140,0.55)");
+  grad.addColorStop(1, "rgba(255,226,140,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  glowSprite = canvas;
+  return glowSprite;
+}
+
 export function createForestWorld(): Toy {
   let width = 0;
   let height = 0;
@@ -102,6 +136,24 @@ export function createForestWorld(): Toy {
   let focusX = 0;
   let focusY = 0;
 
+  // Cached backdrop (sky, stars, celestial, hills). These depend only on the
+  // time of day and the lateral pan (camX), never on the forward amble
+  // (camDepth), so through the long calm stretch — where the scene ambles
+  // forward and the child is not panning — the cache holds and the 140-odd star
+  // arcs, the hill geometry and the sky/glow gradients are painted once and then
+  // reused as a single blit (NFR-12). It is rebuilt on a time-of-day step, on a
+  // pan, or on a resize. A frozen cache also stills the star twinkle while idle,
+  // which suits the wind-down. Null where no canvas exists (headless tests),
+  // where the layers are drawn directly instead.
+  let bgCanvas: HTMLCanvasElement | null = null;
+  let bgCtx: CanvasRenderingContext2D | null = null;
+  let bgTried = false;
+  let bgReady = false;
+  let bgDpr = 0;
+  let bgEO = 0;
+  let bgBucket = -1;
+  let bgCamX = Number.NaN;
+
   const horizon = (): number => height * 0.52;
   const focal = (): number => width * 0.6;
   const spread = (): number => height * 0.6;
@@ -116,6 +168,53 @@ export function createForestWorld(): Toy {
   /** How far sky and ground overdraw past the frame edges, so the walking bob
    * (which translates the whole scene) can never expose a stale strip. */
   const edgeOver = (): number => height * 0.03;
+
+  /**
+   * Ensure the offscreen backdrop canvas exists and matches the current size and
+   * device-pixel-ratio, (re)allocating it if either changed. Returns false where
+   * no canvas is available, so the caller falls back to drawing the backdrop
+   * directly. The canvas is taller than the frame by {@link edgeOver} at top and
+   * bottom, and its context is translated down by that margin, so the same
+   * overdraw the live path relies on is baked into the cache.
+   */
+  function ensureBgCanvas(dpr: number): boolean {
+    if (!bgTried) {
+      bgTried = true;
+      if (typeof document !== "undefined") {
+        const c = document.createElement("canvas");
+        const g = c.getContext("2d");
+        if (g !== null) {
+          bgCanvas = c;
+          bgCtx = g;
+        }
+      }
+    }
+    if (bgCanvas === null || bgCtx === null) return false;
+    const eo = edgeOver();
+    const needW = Math.max(1, Math.round(width * dpr));
+    const needH = Math.max(1, Math.round((height + eo * 2) * dpr));
+    if (bgCanvas.width !== needW || bgCanvas.height !== needH || bgDpr !== dpr) {
+      bgCanvas.width = needW;
+      bgCanvas.height = needH;
+      bgDpr = dpr;
+      bgEO = eo;
+      bgReady = false;
+    }
+    return true;
+  }
+
+  /** Repaint the cached backdrop layers into the offscreen canvas at the current
+   * time of day and pan. Drawn in CSS coordinates, shifted down by the overdraw
+   * margin so the top edge is covered when the scene bobs. */
+  function rebuildBackdrop(at: Atmosphere): void {
+    if (bgCtx === null) return;
+    bgCtx.setTransform(bgDpr, 0, 0, bgDpr, 0, bgEO * bgDpr);
+    bgCtx.clearRect(0, -bgEO, width, height + bgEO * 2);
+    drawSky(bgCtx, at);
+    drawStars(bgCtx, at);
+    drawCelestial(bgCtx, at);
+    drawHills(bgCtx, at);
+  }
 
   function drawSky(ctx: CanvasRenderingContext2D, at: Atmosphere): void {
     const over = edgeOver();
@@ -627,16 +726,26 @@ export function createForestWorld(): Toy {
   }
 
   function drawFireflies(ctx: CanvasRenderingContext2D): void {
+    const sprite = getGlowSprite();
     for (const fl of fireflies) {
       const glow = 0.5 + 0.5 * Math.sin(time * 0.004 + fl.phase);
-      ctx.save();
-      ctx.shadowColor = "rgba(255,226,140,0.9)";
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = css([255, 230, 150], 0.5 + 0.5 * glow);
-      ctx.beginPath();
-      ctx.arc(fl.x, fl.y, 2.6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      if (sprite !== null) {
+        // Cheap blit of the cached glow, sized to match the old blurred dot.
+        const s = 26;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, 0.5 + 0.5 * glow);
+        ctx.drawImage(sprite, fl.x - s / 2, fl.y - s / 2, s, s);
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.shadowColor = "rgba(255,226,140,0.9)";
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = css([255, 230, 150], 0.5 + 0.5 * glow);
+        ctx.beginPath();
+        ctx.arc(fl.x, fl.y, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
     }
   }
 
@@ -714,18 +823,28 @@ export function createForestWorld(): Toy {
   function drawMotes(frame: ToyFrame, at: Atmosphere): void {
     const { ctx } = frame;
     const night = at.starAlpha > 0.5;
+    const sprite = night ? getGlowSprite() : null;
     for (const m of motes) {
       const r = 1 + m.z * 2.2;
       if (night) {
         const glow = 0.4 + 0.6 * Math.abs(Math.sin(time * 0.003 + m.phase));
-        ctx.save();
-        ctx.shadowColor = "rgba(255,226,140,0.8)";
-        ctx.shadowBlur = 8;
-        ctx.fillStyle = css([255, 228, 150], 0.5 * glow * m.z);
-        ctx.beginPath();
-        ctx.arc(m.x, m.y, r * 0.9, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+        if (sprite !== null) {
+          // Cached glow blit; size tracks the old dot-plus-blur footprint.
+          const s = (r * 0.9 + 8) * 2;
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, 0.5 * glow * m.z + 0.25 * m.z);
+          ctx.drawImage(sprite, m.x - s / 2, m.y - s / 2, s, s);
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.shadowColor = "rgba(255,226,140,0.8)";
+          ctx.shadowBlur = 8;
+          ctx.fillStyle = css([255, 228, 150], 0.5 * glow * m.z);
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, r * 0.9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
       } else {
         ctx.fillStyle = css([255, 255, 250], 0.18 * m.z);
         ctx.beginPath();
@@ -864,10 +983,14 @@ export function createForestWorld(): Toy {
       }
       focusX = w / 2;
       focusY = h * 0.4;
+      bgReady = false;
+      bgBucket = -1;
+      bgCamX = Number.NaN;
     },
     resize(w, h) {
       width = w;
       height = h;
+      bgReady = false;
     },
     pointer(pointer: ToyPointer) {
       if (pointer.type === "down") {
@@ -910,10 +1033,26 @@ export function createForestWorld(): Toy {
       ctx.save();
       ctx.translate(0, bob);
 
-      drawSky(ctx, at);
-      drawStars(ctx, at);
-      drawCelestial(ctx, at);
-      drawHills(ctx, at);
+      // Backdrop: painted once into an offscreen cache and blitted, rebuilt only
+      // when the time of day steps or the child pans (camX). The forward amble
+      // (camDepth) leaves it untouched, so it is reused across the long calm
+      // drift. Falls back to drawing the layers directly where no canvas exists.
+      const dpr = frame.dpr ?? 1;
+      const bucket = Math.round(frame.timeOfDay * 60);
+      if (ensureBgCanvas(dpr) && bgCanvas !== null) {
+        if (!bgReady || bucket !== bgBucket || Math.abs(camX - bgCamX) > 1e-4) {
+          rebuildBackdrop(at);
+          bgBucket = bucket;
+          bgCamX = camX;
+          bgReady = true;
+        }
+        ctx.drawImage(bgCanvas, 0, -bgEO, width, height + bgEO * 2);
+      } else {
+        drawSky(ctx, at);
+        drawStars(ctx, at);
+        drawCelestial(ctx, at);
+        drawHills(ctx, at);
+      }
       drawGround(ctx, at);
       drawFloor(frame, at);
       drawDapple(frame);

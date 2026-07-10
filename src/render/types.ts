@@ -40,6 +40,13 @@ export interface ToyFrame {
   readonly phase: Phase | null;
   /** True when the user has asked for reduced motion (NFR-5, WCAG 2.3). */
   readonly reducedMotion: boolean;
+  /**
+   * The (capped) device-pixel-ratio the surface is rendering at. Optional, with
+   * a sensible default of 1 where a caller omits it, so a toy can allocate any
+   * offscreen cache canvas at the same resolution as the main surface and stay
+   * crisp when blitting back (NFR-12).
+   */
+  readonly dpr?: number;
 }
 
 /**

@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  MAX_DEVICE_PIXEL_RATIO,
   MAX_FPS,
   MAX_FRAME_DELTA_MS,
   MIN_FPS,
+  clampDevicePixelRatio,
   clampFrameDelta,
   daylightAtHour,
   targetFrameInterval,
@@ -27,6 +29,24 @@ describe("targetFrameInterval (FR-40)", () => {
     expect(targetFrameInterval(-5)).toBeCloseTo(1000 / MIN_FPS);
     expect(targetFrameInterval(5)).toBeCloseTo(1000 / MAX_FPS);
     expect(targetFrameInterval(Number.NaN)).toBeCloseTo(1000 / MIN_FPS);
+  });
+});
+
+describe("clampDevicePixelRatio (NFR-12)", () => {
+  it("caps a retina ratio at the ceiling", () => {
+    expect(clampDevicePixelRatio(2)).toBe(MAX_DEVICE_PIXEL_RATIO);
+    expect(clampDevicePixelRatio(3)).toBe(MAX_DEVICE_PIXEL_RATIO);
+  });
+
+  it("passes ratios below the ceiling through unchanged", () => {
+    expect(clampDevicePixelRatio(1)).toBe(1);
+    expect(clampDevicePixelRatio(1.25)).toBe(1.25);
+  });
+
+  it("defends against non-finite or sub-unity input", () => {
+    expect(clampDevicePixelRatio(0)).toBe(1);
+    expect(clampDevicePixelRatio(-2)).toBe(1);
+    expect(clampDevicePixelRatio(Number.NaN)).toBe(1);
   });
 });
 
