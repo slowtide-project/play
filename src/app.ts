@@ -105,11 +105,12 @@ function mountHoldTarget(): void {
 mountHoldTarget();
 
 // Developer-only conveniences. All gated on `__SLOWTIDE_DEV_TOOLS__`, a
-// compile-time constant (see vite.config.ts) that is true only under the Vite
-// dev server and baked to `false` in every production build, so this whole
-// block — and the src/dev module behind it — is tree-shaken out and can never
-// reach the child surface. Production still rests neutral until the parent gate
-// (FR-1b); it never auto-starts.
+// compile-time constant (see vite.config.ts) that is true under the Vite dev
+// server, and also in a preview build made with SLOWTIDE_PREVIEW=1. In a normal
+// production build it is baked to `false`, so this whole block — and the src/dev
+// module behind it — is tree-shaken out and can never reach the child surface.
+// Shipped production still rests neutral until the parent gate (FR-1b); it never
+// auto-starts. A preview build deliberately does auto-start, for inspection only.
 if (__SLOWTIDE_DEV_TOOLS__ && surface !== null) {
   // Default straight into the forest so there is no dev dance to see the scene.
   engine.startSession(toSessionConfig(DEFAULT_SETUP), Date.now());

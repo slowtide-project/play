@@ -24,6 +24,27 @@ docker compose --profile preview up --build preview  # built PWA at http://local
 
 Working directly with Node instead of Docker is possible (`nvm use` then `npm install`), but Docker is the supported local path.
 
+## Preview build (inspection only)
+
+A normal build rests on the neutral surface and never starts a session on its own (FR-1b): opening the app shows a quiet, dim screen until a parent completes the setup gate. To inspect the scene directly, build with `SLOWTIDE_PREVIEW=1`, which auto-starts the forest at the real local time of day and adds the on-screen dev toolbar (time-of-day buttons and the engine view).
+
+```
+SLOWTIDE_PREVIEW=1 npm run build && npm run preview   # built preview at http://localhost:4173
+```
+
+The flag is read at build time only. A plain `npm run build`, and therefore the deployed site, is unaffected and still ships neutral. This is a development aid: never publish a preview build to the child's device, since auto-start is exactly what FR-1b guards against.
+
+### Testing on a real iPad
+
+The PWA needs a secure (HTTPS) origin for the service worker and Add to Home Screen to work, so a plain LAN address will not do. The quickest route is a temporary tunnel to the local preview server (no account needed):
+
+```
+SLOWTIDE_PREVIEW=1 npm run build && npm run preview   # terminal 1: serves on :4173
+cloudflared tunnel --url http://localhost:4173        # terminal 2: prints an https URL
+```
+
+Open the printed `https://<name>.trycloudflare.com` in Safari on the iPad, then Share > Add to Home Screen and launch it. `preview.allowedHosts` is set to `true` so the tunnel host is accepted. Keep both terminals running for the duration of the test; the URL stops working once the tunnel is closed.
+
 ## Structure
 
 ```

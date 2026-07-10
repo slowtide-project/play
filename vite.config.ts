@@ -2,12 +2,23 @@
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+// `process` is a Node runtime global: this config file runs under Node during
+// the build. Declared locally because @types/node is intentionally not part of
+// the app's type surface (it targets the browser).
+declare const process: { env: Record<string, string | undefined> };
+
 /**
  * The developer-only visualisation (src/dev) is gated on `__SLOWTIDE_DEV_TOOLS__`.
- * `define` bakes it to `false` in every production build, so the whole module is
- * tree-shaken out and can never reach the child-facing surface. This is keyed off
- * `command`, not NODE_ENV: the Docker image sets NODE_ENV=development, which would
- * otherwise leave `import.meta.env.DEV` true even during `vite build`.
+ * `define` bakes it to `false` in a normal production build, so the whole module
+ * is tree-shaken out and can never reach the child-facing surface. This is keyed
+ * off `command`, not NODE_ENV: the Docker image sets NODE_ENV=development, which
+ * would otherwise leave `import.meta.env.DEV` true even during `vite build`.
+ *
+ * Setting SLOWTIDE_PREVIEW=1 at build time also turns the flag on in a
+ * production-like build, so the dev experience (auto-start into the forest at
+ * the real time of day, plus the on-screen toolbar) can be inspected. This is a
+ * build-time opt-in only: a plain `vite build` still ships neutral and never
+ * auto-starts, honouring FR-1b and D-7.
  *
  * `define` is only statically applied at build time, so this serve-only plugin
  * provides the flag as a runtime global for the dev server.
@@ -28,7 +39,9 @@ const devToolsFlag: Plugin = {
 export default defineConfig(({ command }) => ({
   base: "/",
   define: {
-    __SLOWTIDE_DEV_TOOLS__: JSON.stringify(command === "serve"),
+    __SLOWTIDE_DEV_TOOLS__: JSON.stringify(
+      command === "serve" || process.env.SLOWTIDE_PREVIEW === "1",
+    ),
   },
   // Bind to all interfaces so the dev server is reachable from the host when
   // running in Docker; polling makes file watching reliable over bind mounts.
@@ -40,6 +53,11 @@ export default defineConfig(({ command }) => ({
   preview: {
     host: true,
     port: 4173,
+    // Allow any host so a tunnelled URL (e.g. a cloudflared *.trycloudflare.com
+    // address) can reach this local preview when testing on a real iPad. This
+    // affects only the local `vite preview` server, never the deployed static
+    // site (served by nginx / GitHub Pages), so it has no production impact.
+    allowedHosts: true,
   },
   plugins: [
     devToolsFlag,
