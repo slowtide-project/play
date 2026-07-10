@@ -109,7 +109,13 @@ function mountHoldTarget(): HoldCue {
     paddingRight: "18px",
     boxSizing: "border-box",
     cursor: "pointer",
+    userSelect: "none",
   } satisfies Partial<CSSStyleDeclaration>);
+  // Suppress the iOS long-press text selection, callout, and tap highlight, so a
+  // steady hold reads as a gesture rather than selecting the hint text.
+  target.style.setProperty("-webkit-user-select", "none");
+  target.style.setProperty("-webkit-touch-callout", "none");
+  target.style.setProperty("-webkit-tap-highlight-color", "transparent");
 
   // The cue itself. Non-interactive (the whole target is the hit area) and very
   // low-contrast, so it reads as a quiet adult handle, not a toy.
@@ -183,41 +189,46 @@ function mountHoldTarget(): HoldCue {
     pulse = null;
   };
 
-  let holdTimer = 0;
-  let fill: Animation | null = null;
-  const resetArc = (): void => {
-    fill?.cancel();
-    fill = null;
-    arc.setAttribute("stroke-dashoffset", String(CIRC));
+  // Drive the fill ring by hand from a rAF clock rather than the Web Animations
+  // API: Safari does not reliably animate SVG stroke-dashoffset that way, and
+  // this feedback must show even under reduced motion, since it reflects the
+  // hold gesture, not decorative motion or session progress. The ring fills
+  // across the hold and opens the gate when it completes.
+  let holdRaf = 0;
+  let holdStart = 0;
+  const setArc = (progress: number): void => {
+    arc.setAttribute("stroke-dashoffset", String(CIRC * (1 - progress)));
   };
-  const cancel = (): void => {
-    if (holdTimer !== 0) {
-      window.clearTimeout(holdTimer);
-      holdTimer = 0;
+  const stopHold = (): void => {
+    if (holdRaf !== 0) {
+      window.cancelAnimationFrame(holdRaf);
+      holdRaf = 0;
     }
-    resetArc();
+    setArc(0);
     if (resting) startPulse();
   };
-
-  target.addEventListener("pointerdown", () => {
-    if (holdTimer !== 0) return;
-    stopPulse();
-    if (!reduceMotion) {
-      cue.style.opacity = "1";
-      fill = arc.animate([{ strokeDashoffset: CIRC }, { strokeDashoffset: 0 }], {
-        duration: HOLD_TO_REVEAL_MS,
-        easing: "linear",
-        fill: "forwards",
-      });
-    }
-    holdTimer = window.setTimeout(() => {
-      holdTimer = 0;
-      resetArc();
+  const tickHold = (nowMs: number): void => {
+    const progress = Math.min(1, (nowMs - holdStart) / HOLD_TO_REVEAL_MS);
+    setArc(progress);
+    if (progress >= 1) {
+      holdRaf = 0;
+      setArc(0);
       void openEntry();
-    }, HOLD_TO_REVEAL_MS);
+      return;
+    }
+    holdRaf = window.requestAnimationFrame(tickHold);
+  };
+
+  target.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    if (holdRaf !== 0) return;
+    stopPulse();
+    cue.style.opacity = "1";
+    holdStart = performance.now();
+    holdRaf = window.requestAnimationFrame(tickHold);
   });
   for (const event of ["pointerup", "pointerleave", "pointercancel"] as const) {
-    target.addEventListener(event, cancel);
+    target.addEventListener(event, stopHold);
   }
 
   return {
@@ -228,7 +239,7 @@ function mountHoldTarget(): HoldCue {
         startPulse();
       } else {
         stopPulse();
-        cancel();
+        stopHold();
       }
     },
   };
