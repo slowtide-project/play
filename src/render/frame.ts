@@ -20,7 +20,7 @@ export const BUDGET_SAMPLE_MS = 1000;
  * per-second render (and therefore heat and battery) most in the busy Engage
  * phase where the animation-speed lever is near 1 (NFR-12). */
 export const MIN_FPS = 6;
-export const MAX_FPS = 40;
+export const MAX_FPS = 30;
 
 /** Largest per-frame delta we hand a toy, so a paused tab cannot jump it. */
 export const MAX_FRAME_DELTA_MS = 100;
@@ -31,7 +31,7 @@ export const MAX_FRAME_DELTA_MS = 100;
  * fill-rate saving from capping is large on an older GPU, which then shades far
  * fewer pixels per frame (NFR-12). Below this, the raw ratio is honoured.
  */
-export const MAX_DEVICE_PIXEL_RATIO = 1.5;
+export const MAX_DEVICE_PIXEL_RATIO = 1.25;
 
 /** Clamp a raw device-pixel-ratio into the range we actually render at. */
 export function clampDevicePixelRatio(raw: number): number {

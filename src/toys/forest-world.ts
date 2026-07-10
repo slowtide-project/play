@@ -154,6 +154,15 @@ export function createForestWorld(): Toy {
   let bgBucket = -1;
   let bgCamX = Number.NaN;
 
+  // Cached vignette. It is a fixed full-screen radial that depends only on the
+  // canvas size, so it is painted once and blitted rather than regenerated and
+  // filled every frame (NFR-12). Rebuilt only on a resize.
+  let vgCanvas: HTMLCanvasElement | null = null;
+  let vgCtx: CanvasRenderingContext2D | null = null;
+  let vgTried = false;
+  let vgReady = false;
+  let vgDpr = 0;
+
   const horizon = (): number => height * 0.52;
   const focal = (): number => width * 0.6;
   const spread = (): number => height * 0.6;
@@ -203,17 +212,27 @@ export function createForestWorld(): Toy {
     return true;
   }
 
-  /** Repaint the cached backdrop layers into the offscreen canvas at the current
-   * time of day and pan. Drawn in CSS coordinates, shifted down by the overdraw
+  /** Paint the whole camera-independent backdrop (sky, stars, celestial, hills
+   * and the ground wash) into a context. Everything here depends only on the
+   * time of day and lateral pan, so it can be cached and reused; the ground is
+   * included because its gradient is a full-screen fill that otherwise repeated
+   * every frame for no change (NFR-12). */
+  function paintBackdrop(g: CanvasRenderingContext2D, at: Atmosphere): void {
+    drawSky(g, at);
+    drawStars(g, at);
+    drawCelestial(g, at);
+    drawHills(g, at);
+    drawGround(g, at);
+  }
+
+  /** Repaint the cached backdrop into the offscreen canvas at the current time
+   * of day and pan. Drawn in CSS coordinates, shifted down by the overdraw
    * margin so the top edge is covered when the scene bobs. */
   function rebuildBackdrop(at: Atmosphere): void {
     if (bgCtx === null) return;
     bgCtx.setTransform(bgDpr, 0, 0, bgDpr, 0, bgEO * bgDpr);
     bgCtx.clearRect(0, -bgEO, width, height + bgEO * 2);
-    drawSky(bgCtx, at);
-    drawStars(bgCtx, at);
-    drawCelestial(bgCtx, at);
-    drawHills(bgCtx, at);
+    paintBackdrop(bgCtx, at);
   }
 
   function drawSky(ctx: CanvasRenderingContext2D, at: Atmosphere): void {
@@ -331,15 +350,12 @@ export function createForestWorld(): Toy {
     const topY = baseY - h;
     const span = foliageBottom - topY;
 
-    // Trunk: tapered (wider at the base), lit from the left and shaded right so
-    // it reads as round, with a couple of faint bark streaks.
+    // Trunk: a solid tapered column (wider at the base). Flat-shaded rather than
+    // gradient-filled, and without the bark streaks, to cut per-tree GPU work
+    // across a whole forest of them (NFR-12).
     const baseW = Math.max(2, h * 0.055);
     const topW = baseW * 0.6;
-    const tg = ctx.createLinearGradient(x - baseW, 0, x + baseW, 0);
-    tg.addColorStop(0, css(mix(trunk, [255, 244, 224], 0.22)));
-    tg.addColorStop(0.5, css(trunk));
-    tg.addColorStop(1, css(mix(trunk, [0, 0, 0], 0.38)));
-    ctx.fillStyle = tg;
+    ctx.fillStyle = css(trunk);
     ctx.beginPath();
     ctx.moveTo(x - baseW / 2, baseY);
     ctx.lineTo(x - topW / 2, foliageBottom);
@@ -347,34 +363,12 @@ export function createForestWorld(): Toy {
     ctx.lineTo(x + baseW / 2, baseY);
     ctx.closePath();
     ctx.fill();
-    if (baseW > 6) {
-      ctx.strokeStyle = css(mix(trunk, [0, 0, 0], 0.4), 0.5);
-      ctx.lineWidth = Math.max(1, baseW * 0.08);
-      ctx.lineCap = "round";
-      for (const o of [-0.18, 0.12]) {
-        ctx.beginPath();
-        ctx.moveTo(x + baseW * o, baseY - baseW * 0.4);
-        ctx.lineTo(x + baseW * o * 0.7, foliageBottom + baseW * 0.4);
-        ctx.stroke();
-      }
-    }
 
     if (shape.round) {
-      // Broadleaf: a soft clump of blobs, lit from the upper-left. The lowest
-      // blob sits at the trunk top so the crown always meets its trunk rather
-      // than stopping short and leaving a bare, detached-looking column.
+      // Broadleaf: a soft clump of blobs, flat-filled (no radial gradient) to
+      // keep the silhouette while cutting per-tree GPU work (NFR-12).
       const r = h * 0.2 * shape.widthMul;
-      const rg = ctx.createRadialGradient(
-        x - r * 0.4,
-        topY + span * 0.3,
-        r * 0.2,
-        x,
-        topY + span * 0.5,
-        r * 1.7,
-      );
-      rg.addColorStop(0, css(mix(foliage, [255, 255, 235], 0.2)));
-      rg.addColorStop(1, css(mix(foliage, [0, 0, 0], 0.14)));
-      ctx.fillStyle = rg;
+      ctx.fillStyle = css(foliage);
       const blobs = [
         [0, span * 0.18, r],
         [-r * 0.7, span * 0.42, r * 0.85],
@@ -391,11 +385,8 @@ export function createForestWorld(): Toy {
       }
       return;
     }
-    // Fir: drooping tiers, with the crown lit lighter at the top.
-    const cg = ctx.createLinearGradient(0, topY, 0, foliageBottom);
-    cg.addColorStop(0, css(mix(foliage, [255, 255, 235], 0.16)));
-    cg.addColorStop(1, css(mix(foliage, [0, 0, 0], 0.12)));
-    ctx.fillStyle = cg;
+    // Fir: drooping tiers, flat-filled (no gradient) to cut per-tree GPU work.
+    ctx.fillStyle = css(foliage);
     const halfBase = h * 0.24 * shape.widthMul;
     for (let t = 0; t < shape.tiers; t++) {
       const f = t / (shape.tiers - 1);
@@ -914,6 +905,50 @@ export function createForestWorld(): Toy {
     ctx.fillRect(0, 0, width, height);
   }
 
+  /** Ensure the vignette cache canvas exists and matches the size and dpr. */
+  function ensureVignette(dpr: number): boolean {
+    if (!vgTried) {
+      vgTried = true;
+      if (typeof document !== "undefined") {
+        const c = document.createElement("canvas");
+        const g = c.getContext("2d");
+        if (g !== null) {
+          vgCanvas = c;
+          vgCtx = g;
+        }
+      }
+    }
+    if (vgCanvas === null || vgCtx === null) return false;
+    const needW = Math.max(1, Math.round(width * dpr));
+    const needH = Math.max(1, Math.round(height * dpr));
+    if (vgCanvas.width !== needW || vgCanvas.height !== needH || vgDpr !== dpr) {
+      vgCanvas.width = needW;
+      vgCanvas.height = needH;
+      vgDpr = dpr;
+      vgReady = false;
+    }
+    return true;
+  }
+
+  /** Blit the cached vignette, painting it once on first use or after a resize.
+   * Falls back to drawing it directly where no canvas is available. */
+  function paintVignette(ctx: CanvasRenderingContext2D, dpr: number): void {
+    if (ensureVignette(dpr) && vgCanvas !== null && vgCtx !== null) {
+      if (!vgReady) {
+        vgCtx.setTransform(vgDpr, 0, 0, vgDpr, 0, 0);
+        vgCtx.clearRect(0, 0, width, height);
+        drawVignette(vgCtx);
+        vgReady = true;
+      }
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(vgCanvas, 0, 0);
+      ctx.restore();
+    } else {
+      drawVignette(ctx);
+    }
+  }
+
   // ---- update -------------------------------------------------------------
   function update(frame: ToyFrame): void {
     const speed = frame.reducedMotion ? 0 : frame.levers.animationSpeed;
@@ -1048,12 +1083,8 @@ export function createForestWorld(): Toy {
         }
         ctx.drawImage(bgCanvas, 0, -bgEO, width, height + bgEO * 2);
       } else {
-        drawSky(ctx, at);
-        drawStars(ctx, at);
-        drawCelestial(ctx, at);
-        drawHills(ctx, at);
+        paintBackdrop(ctx, at);
       }
-      drawGround(ctx, at);
       drawFloor(frame, at);
       drawDapple(frame);
       drawMist(frame, at);
@@ -1067,7 +1098,7 @@ export function createForestWorld(): Toy {
 
       ctx.restore();
 
-      drawVignette(ctx);
+      paintVignette(ctx, dpr);
 
       ctx.fillStyle = css([255, 255, 255], 0.18 + 0.12 * frame.budget);
       ctx.font = `${Math.round(Math.min(width, height) * 0.02)}px system-ui, sans-serif`;

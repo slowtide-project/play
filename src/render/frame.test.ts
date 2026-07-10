@@ -40,7 +40,7 @@ describe("clampDevicePixelRatio (NFR-12)", () => {
 
   it("passes ratios below the ceiling through unchanged", () => {
     expect(clampDevicePixelRatio(1)).toBe(1);
-    expect(clampDevicePixelRatio(1.25)).toBe(1.25);
+    expect(clampDevicePixelRatio(1.1)).toBe(1.1);
   });
 
   it("defends against non-finite or sub-unity input", () => {
