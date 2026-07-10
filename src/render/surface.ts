@@ -98,17 +98,50 @@ export function mountSurface(
     return typeof performance !== "undefined" ? performance.now() : now();
   }
 
+  /**
+   * Re-measure the host and resize the canvas to match. Guarded so a spurious
+   * resize event with unchanged dimensions is a no-op: reassigning canvas.width
+   * would otherwise clear the frame and flash. Only touches the toy or repaints
+   * when something actually changed.
+   */
   function resize(): void {
     const dpr = clampDevicePixelRatio(window.devicePixelRatio || 1);
-    deviceRatio = dpr;
     const rect = host.getBoundingClientRect();
-    width = Math.max(1, Math.round(rect.width));
-    height = Math.max(1, Math.round(rect.height));
+    const w = Math.max(1, Math.round(rect.width));
+    const h = Math.max(1, Math.round(rect.height));
+    if (
+      w === width &&
+      h === height &&
+      dpr === deviceRatio &&
+      canvas.width === Math.round(w * dpr)
+    ) {
+      return;
+    }
+    deviceRatio = dpr;
+    width = w;
+    height = h;
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     if (ctx !== null) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (running && toyReady) toy.resize(width, height);
     if (!running) drawRest();
+  }
+
+  // iOS fires `resize`/`orientationchange` before the new layout has settled, so
+  // a single synchronous measure can read stale (pre-rotation) dimensions and
+  // lock the canvas to the wrong size. Re-measure immediately, on the next
+  // frame, and once more after a short delay; the guard in `resize` makes the
+  // repeats free when nothing changed. This is the fix for the scene looking
+  // wrong after a portrait/landscape round trip.
+  let resizeTimer = 0;
+  function scheduleResize(): void {
+    resize();
+    window.requestAnimationFrame(resize);
+    if (resizeTimer !== 0) window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      resizeTimer = 0;
+      resize();
+    }, 300);
   }
 
   /** The quiet, dim rest surface for neutral and ended states (FR-5, FR-7). */
@@ -266,7 +299,8 @@ export function mountSurface(
   canvas.addEventListener("pointerup", onPointerUp);
   canvas.addEventListener("pointercancel", onPointerUp);
   canvas.addEventListener("pointerleave", onPointerUp);
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", scheduleResize);
+  window.addEventListener("orientationchange", scheduleResize);
   document.addEventListener("visibilitychange", onVisibility);
 
   resize();
@@ -292,8 +326,10 @@ export function mountSurface(
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
       canvas.removeEventListener("pointerleave", onPointerUp);
-      window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", scheduleResize);
+      window.removeEventListener("orientationchange", scheduleResize);
       document.removeEventListener("visibilitychange", onVisibility);
+      if (resizeTimer !== 0) window.clearTimeout(resizeTimer);
       canvas.remove();
     },
   };
