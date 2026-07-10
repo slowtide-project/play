@@ -1,0 +1,53 @@
+# Local workflow, Docker only. No host Node/npm required.
+#
+#   docker compose up dev                 # dev server at http://localhost:5173
+#   docker compose run --rm ci            # typecheck + lint + format + test + build
+#   docker compose run --rm app npm test  # any one-off npm command
+#   docker compose up --build preview      # production build served at http://localhost:8080
+
+services:
+  # Hot-reloading Vite dev server.
+  dev:
+    build:
+      context: .
+      target: dev
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      # Keep the image's node_modules; don't let the host shadow it.
+      - /app/node_modules
+    environment:
+      # Reliable file watching across the macOS bind mount.
+      - CHOKIDAR_USEPOLLING=true
+
+  # One-shot container for arbitrary npm commands (test, lint, etc.).
+  app:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - .:/app
+      - /app/node_modules
+    profiles: ["tools"]
+
+  # The full pre-commit / CI gate.
+  ci:
+    build:
+      context: .
+      target: dev
+    command: npm run verify
+    volumes:
+      - .:/app
+      - /app/node_modules
+    profiles: ["tools"]
+
+  # Production-like static preview of the built PWA (nginx).
+  preview:
+    build:
+      context: .
+      target: serve
+    ports:
+      - "8080:80"
+    profiles: ["preview"]
