@@ -2,7 +2,6 @@ repository:
   name: play
   description: Slowtide, a wind-down PWA whose hidden arousal budget decays over a parent-set session.
   homepage: https://play.slowtide.app
-  # topics: daemon-labs, daemon-labs-io, terraform-triage
   private: false
   has_issues: true
   has_projects: false
@@ -30,43 +29,25 @@ rulesets:
     rules:
       - type: deletion
       - type: non_fast_forward
-  # - name: Changes must be reviewed
-  #   target: branch
-  #   enforcement: active
-  #   bypass_actors:
-  #     - actor_id: null
-  #       actor_type: OrganizationAdmin
-  #       bypass_mode: pull_request
-  #   conditions:
-  #     ref_name:
-  #       include:
-  #         - "~DEFAULT_BRANCH"
-  #       exclude: []
-  #   rules:
-  #     - type: pull_request
-  #       parameters:
-  #         allowed_merge_methods:
-  #           - squash
-  #         dismiss_stale_reviews_on_push: true
-  #         require_code_owner_review: true
-  #         require_last_push_approval: true
-  #         required_approving_review_count: 1
-  #         required_review_thread_resolution: true
-  # - name: Changes must pass status checks
-  #   target: branch
-  #   enforcement: active
-  #   bypass_actors:
-  #     - actor_id: null
-  #       actor_type: OrganizationAdmin
-  #       bypass_mode: pull_request
-  #   conditions:
-  #     ref_name:
-  #       include:
-  #         - "~DEFAULT_BRANCH"
-  #       exclude: []
-  #   rules:
-  #     - type: required_status_checks
-  #       parameters:
-  #         required_status_checks:
-  #           - context: linting / Linting
-  #         strict_required_status_checks_policy: true
+  - name: Changes must be reviewed
+    target: branch
+    enforcement: active
+    bypass_actors:
+      - actor_id: null
+        actor_type: OrganizationAdmin
+        bypass_mode: pull_request
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: pull_request
+        parameters:
+          allowed_merge_methods:
+            - squash
+          dismiss_stale_reviews_on_push: true
+          require_code_owner_review: true
+          require_last_push_approval: true
+          required_approving_review_count: 1
+          required_review_thread_resolution: true
