@@ -1,50 +1,72 @@
-# Repository settings, synced by the Probot "Settings" app from the default
-# branch. See https://probot.github.io/apps/settings/. Only takes effect once
-# that app is installed on the repo. All keys are optional.
-#
-# Scope here is deliberately minimal: merge hygiene, labels, and repo metadata.
-# No branch protection (managed elsewhere if needed).
-
 repository:
   name: play
-  description: Slowtide, a bedtime wind-down PWA whose hidden arousal budget decays over a parent-set session.
+  description: Slowtide, a wind-down PWA whose hidden arousal budget decays over a parent-set session.
   homepage: https://play.slowtide.app
-  default_branch: main
-
+  # topics: daemon-labs, daemon-labs-io, terraform-triage
+  private: false
   has_issues: true
   has_projects: false
   has_wiki: false
   has_downloads: false
-
-  # Squash-only, to keep a linear history that matches Conventional Commits.
+  default_branch: main
   allow_squash_merge: true
   allow_merge_commit: false
   allow_rebase_merge: false
-
-  # Tidy up merged branches automatically.
   delete_branch_on_merge: true
-
-# Label set aligned to the Conventional Commit types used in this repo,
-# plus a few general-purpose labels.
-labels:
-  - name: feat
-    color: 0e8a16
-    description: A new feature
-  - name: fix
-    color: d73a4a
-    description: A bug fix
-  - name: docs
-    color: 0075ca
-    description: Documentation only
-  - name: test
-    color: fbca04
-    description: Tests only
-  - name: chore
-    color: cfd3d7
-    description: Tooling, deps, or housekeeping
-  - name: bug
-    color: b60205
-    description: Something is not working
-  - name: question
-    color: d876e3
-    description: Further information is requested
+  enable_automated_security_fixes: true
+  enable_vulnerability_alerts: true
+teams:
+  - name: slowtide
+    permission: admin
+rulesets:
+  - name: Prevent destruction of the default branch
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+  # - name: Changes must be reviewed
+  #   target: branch
+  #   enforcement: active
+  #   bypass_actors:
+  #     - actor_id: null
+  #       actor_type: OrganizationAdmin
+  #       bypass_mode: pull_request
+  #   conditions:
+  #     ref_name:
+  #       include:
+  #         - "~DEFAULT_BRANCH"
+  #       exclude: []
+  #   rules:
+  #     - type: pull_request
+  #       parameters:
+  #         allowed_merge_methods:
+  #           - squash
+  #         dismiss_stale_reviews_on_push: true
+  #         require_code_owner_review: true
+  #         require_last_push_approval: true
+  #         required_approving_review_count: 1
+  #         required_review_thread_resolution: true
+  # - name: Changes must pass status checks
+  #   target: branch
+  #   enforcement: active
+  #   bypass_actors:
+  #     - actor_id: null
+  #       actor_type: OrganizationAdmin
+  #       bypass_mode: pull_request
+  #   conditions:
+  #     ref_name:
+  #       include:
+  #         - "~DEFAULT_BRANCH"
+  #       exclude: []
+  #   rules:
+  #     - type: required_status_checks
+  #       parameters:
+  #         required_status_checks:
+  #           - context: linting / Linting
+  #         strict_required_status_checks_policy: true
