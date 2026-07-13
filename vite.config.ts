@@ -42,6 +42,13 @@ export default defineConfig(({ command }) => ({
     __SLOWTIDE_DEV_TOOLS__: JSON.stringify(
       command === "serve" || process.env.SLOWTIDE_PREVIEW === "1",
     ),
+    // A human-readable stamp of when this bundle was built. Shown only in the
+    // parent area so a parent can confirm at a glance that a deploy landed
+    // (never on the child surface; NFR-1). Prefer an injected commit/tag if the
+    // deploy provides one, else fall back to the build time.
+    __SLOWTIDE_BUILD_ID__: JSON.stringify(
+      process.env.SLOWTIDE_BUILD_ID ?? new Date().toISOString(),
+    ),
   },
   // Bind to all interfaces so the dev server is reachable from the host when
   // running in Docker; polling makes file watching reliable over bind mounts.
@@ -63,9 +70,21 @@ export default defineConfig(({ command }) => ({
     devToolsFlag,
     VitePWA({
       registerType: "autoUpdate",
+      // We register the worker ourselves (src/platform/app-update.ts) so we can
+      // re-check for a new deploy on foreground and expose a manual force-update
+      // behind the parent gate. Disable the plugin's own registerSW.js injection
+      // to avoid registering the worker twice.
+      injectRegister: false,
       // Offline-first: precache the app shell and assets (NFR-8).
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
+        // Take over immediately on a new deploy so an already-open page can be
+        // reloaded onto the latest build (paired with the controllerchange
+        // reload in src/platform/app-update.ts). The plugin sets these itself
+        // only when it injects its own registerSW; we register the worker
+        // ourselves (injectRegister:false), so set them explicitly.
+        skipWaiting: true,
+        clientsClaim: true,
       },
       manifest: {
         name: "Slowtide",

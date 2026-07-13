@@ -29,6 +29,11 @@ export type SetupResult =
 export interface SetupContext {
   /** Whether a live/test session is currently running (enables "End"). */
   readonly sessionActive: boolean;
+  /**
+   * Force the app to the latest deployed build (parent-gated, NFR-7). When
+   * provided, a "Check for updates" control and the build stamp are shown.
+   */
+  readonly onCheckForUpdates?: (() => void) | undefined;
 }
 
 type Mutable = { -readonly [K in keyof SetupState]: SetupState[K] };
@@ -194,6 +199,23 @@ export function openSessionSetup(
   });
   ceilingSet.append(volume.root, brightness.root, motion.root);
 
+  // ---- Infinite mode default ---------------------------------------------
+  const infiniteSet = el("fieldset", "st-parent-fieldset");
+  infiniteSet.append(el("legend", undefined, "Infinite mode"));
+  const infiniteLevel = slider(
+    "Calm level",
+    SETUP_BOUNDS.infiniteLevel,
+    0.01,
+    state.infiniteLevel,
+    pct,
+    "How lively the Infinite tile runs. It holds steady here and never winds down.",
+  );
+  infiniteLevel.input.addEventListener("input", () => {
+    state.infiniteLevel = infiniteLevel.input.valueAsNumber;
+    infiniteLevel.setValue(state.infiniteLevel);
+  });
+  infiniteSet.append(infiniteLevel.root);
+
   // ---- Test-only controls -------------------------------------------------
   const testSet = el("fieldset", "st-parent-fieldset");
   testSet.append(el("legend", undefined, "Test options (daytime only)"));
@@ -266,6 +288,25 @@ export function openSessionSetup(
   });
   actions.append(pinBtn, cancelBtn, startBtn);
 
+  // ---- Footer: build stamp + manual force-update (parent-gated) -----------
+  // Lives here, behind the gate, never on the child menu (NFR-7, D-14). The
+  // build stamp lets a parent confirm a deploy actually landed; the button is
+  // the reliable backup that forces the newest build immediately.
+  let footer: HTMLElement | null = null;
+  if (context.onCheckForUpdates !== undefined) {
+    const forceUpdate = context.onCheckForUpdates;
+    footer = el("div", "st-parent-foot");
+    footer.append(el("span", "st-parent-build", `Build ${__SLOWTIDE_BUILD_ID__}`));
+    const updateBtn = el("button", "st-parent-btn", "Check for updates");
+    updateBtn.type = "button";
+    updateBtn.addEventListener("click", () => {
+      updateBtn.disabled = true;
+      updateBtn.textContent = "Updating…";
+      forceUpdate();
+    });
+    footer.append(updateBtn);
+  }
+
   function onKeydown(event: KeyboardEvent): void {
     if (event.key === "Escape") settle({ action: "cancel" });
   }
@@ -279,9 +320,11 @@ export function openSessionSetup(
     startCeiling.root,
     steepness.root,
     ceilingSet,
+    infiniteSet,
     testSet,
     actions,
   );
+  if (footer !== null) overlay.card.append(footer);
   applyMode();
 
   return result;

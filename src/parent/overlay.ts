@@ -88,6 +88,12 @@ const STYLE = `
 .${PARENT_ROOT_CLASS}-btn.is-danger { color: #f2a03d; border-color: #5a3a1a; }
 .${PARENT_ROOT_CLASS}-fieldset { border: 1px solid #232a3f; border-radius: 12px; padding: 12px 14px 4px; margin: 8px 0 0; }
 .${PARENT_ROOT_CLASS}-fieldset legend { padding: 0 6px; color: #9fb0d0; font-size: 13px; }
+.${PARENT_ROOT_CLASS}-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; margin-top: 20px; padding-top: 16px; border-top: 1px solid #232a3f;
+}
+.${PARENT_ROOT_CLASS}-build { color: #8a94ad; font-size: 12px; font-variant-numeric: tabular-nums; }
+.${PARENT_ROOT_CLASS}-foot .st-parent-btn:disabled { opacity: 0.6; cursor: default; }
 `;
 
 /** Inject the shared parent stylesheet once. */

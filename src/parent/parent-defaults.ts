@@ -32,6 +32,8 @@ export interface ParentDefaults {
   readonly volume: number;
   readonly brightness: number;
   readonly motion: number;
+  /** Infinite-mode frozen calm level, applied when the Infinite tile is tapped (FR-56). */
+  readonly infiniteLevel: number;
   readonly version: number;
 }
 
@@ -43,6 +45,7 @@ export const DEFAULT_PARENT_DEFAULTS: ParentDefaults = {
   volume: DEFAULT_SETUP.volume,
   brightness: DEFAULT_SETUP.brightness,
   motion: DEFAULT_SETUP.motion,
+  infiniteLevel: DEFAULT_SETUP.infiniteLevel,
   version: PARENT_DEFAULTS_VERSION,
 };
 
@@ -78,6 +81,11 @@ export function sanitiseDefaults(value: unknown): ParentDefaults {
       SETUP_BOUNDS.ceiling,
     ),
     motion: readNumber(raw.motion, DEFAULT_PARENT_DEFAULTS.motion, SETUP_BOUNDS.ceiling),
+    infiniteLevel: readNumber(
+      raw.infiniteLevel,
+      DEFAULT_PARENT_DEFAULTS.infiniteLevel,
+      SETUP_BOUNDS.infiniteLevel,
+    ),
     version: PARENT_DEFAULTS_VERSION,
   };
 }
@@ -91,6 +99,7 @@ export function defaultsFromSetup(state: SetupState): ParentDefaults {
     volume: state.volume,
     brightness: state.brightness,
     motion: state.motion,
+    infiniteLevel: state.infiniteLevel,
     version: PARENT_DEFAULTS_VERSION,
   });
 }
@@ -109,5 +118,6 @@ export function applyDefaults(defaults: ParentDefaults): SetupState {
     volume: defaults.volume,
     brightness: defaults.brightness,
     motion: defaults.motion,
+    infiniteLevel: defaults.infiniteLevel,
   };
 }

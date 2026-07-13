@@ -6,7 +6,7 @@
  * interaction levers. Nothing here touches the DOM, timers, or I/O.
  */
 
-export type SessionMode = "live" | "test";
+export type SessionMode = "live" | "test" | "infinite";
 
 /** Parent-set upper limits the engine output must never exceed (FR-12). All 0..1. */
 export interface Ceilings {
@@ -24,9 +24,12 @@ export interface SessionConfig {
   /** Curve descent shaping, > 0. 1 is the baseline (FR-11). */
   readonly steepness: number;
   readonly mode: SessionMode;
-  /** Live sessions always decay. Test mode may turn decay off (FR-43). */
+  /** Live sessions always decay. Test and infinite modes hold steady (FR-43, D-12). */
   readonly decayEnabled: boolean;
-  /** Test mode only: hold the budget at this level, 0..1, else null (FR-44). */
+  /**
+   * Hold the budget at this level, 0..1, else null. Used by test mode (FR-44)
+   * and by Infinite mode, which runs frozen at a parent-set calm level (D-12).
+   */
   readonly frozenLevel: number | null;
   readonly ceilings: Ceilings;
 }

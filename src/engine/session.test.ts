@@ -131,6 +131,48 @@ describe("test mode (D-5)", () => {
   });
 });
 
+describe("infinite mode (D-12, FR-50)", () => {
+  it("holds the budget at the frozen level for any elapsed time", () => {
+    const engine = createEngine(memoryStorage());
+    engine.startSession(
+      liveConfig({ mode: "infinite", decayEnabled: false, frozenLevel: 0.3 }),
+      START,
+    );
+    expect(engine.getState(START).budget).toBeCloseTo(0.3);
+    expect(engine.getState(START + NINETY_MIN * 0.5).budget).toBeCloseTo(0.3);
+    expect(engine.getState(START + NINETY_MIN * 3).budget).toBeCloseTo(0.3);
+  });
+
+  it("never ends on elapsed time (FR-50): stays active well past the duration", () => {
+    const engine = createEngine(memoryStorage());
+    engine.startSession(
+      liveConfig({ mode: "infinite", decayEnabled: false, frozenLevel: 0.3 }),
+      START,
+    );
+    expect(engine.getState(START + NINETY_MIN).status).toBe("active");
+    expect(engine.getState(START + NINETY_MIN * 100).status).toBe("active");
+    expect(engine.getState(START + NINETY_MIN * 100).progress).toBeNull();
+    expect(engine.getState(START + NINETY_MIN * 100).phase).toBeNull();
+  });
+
+  it("ends to neutral only when the parent ends it", () => {
+    const engine = createEngine(memoryStorage());
+    engine.startSession(liveConfig({ mode: "infinite", frozenLevel: 0.3 }), START);
+    engine.endSession();
+    expect(engine.getState(START + NINETY_MIN * 5).status).toBe("neutral");
+  });
+
+  it("keeps frozen levers within the parent ceilings (FR-12)", () => {
+    const ceilings: Ceilings = { volume: 0.2, brightness: 0.3, motion: 0.4 };
+    const engine = createEngine(memoryStorage());
+    engine.startSession(liveConfig({ mode: "infinite", frozenLevel: 1, ceilings }), START);
+    const { levers } = engine.getState(START + NINETY_MIN * 2);
+    expect(levers.audioVolume).toBeLessThanOrEqual(ceilings.volume);
+    expect(levers.brightness).toBeLessThanOrEqual(ceilings.brightness);
+    expect(levers.animationSpeed).toBeLessThanOrEqual(ceilings.motion);
+  });
+});
+
 describe("exploit resilience (NFR-3, FR-22, FR-47)", () => {
   it("returns the same budget for the same time no matter how often it is read", () => {
     const engine = createEngine(memoryStorage());

@@ -27,6 +27,11 @@ export interface ParentEntryOptions {
   readonly pin: PinPort;
   /** Injectable randomness for the keypad shuffle (tests); defaults to Math.random. */
   readonly rng?: () => number;
+  /**
+   * Force the app to the latest deployed build now (parent-gated, NFR-7). When
+   * provided, setup shows a "Check for updates" control; omitted in tests.
+   */
+  readonly onCheckForUpdates?: (() => void) | undefined;
 }
 
 /**
@@ -44,6 +49,7 @@ export async function openParentEntry(
   for (;;) {
     const result = await openSessionSetup(host, options.initialSetup, {
       sessionActive: options.sessionActive,
+      onCheckForUpdates: options.onCheckForUpdates,
     });
     if (result.action !== "changePin") return result;
     // Re-verify by setting a new PIN, then return to setup either way.

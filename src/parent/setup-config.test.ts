@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_SETUP, SETUP_BOUNDS, toSessionConfig, clampToBounds } from "./setup-config.js";
+import {
+  DEFAULT_SETUP,
+  SETUP_BOUNDS,
+  toSessionConfig,
+  clampToBounds,
+  menuModeConfig,
+} from "./setup-config.js";
 import type { SetupState } from "./setup-config.js";
 
 function setup(overrides: Partial<SetupState> = {}): SetupState {
@@ -51,6 +57,52 @@ describe("toSessionConfig — test mode (D-5)", () => {
       setup({ mode: "test", decayOff: true, freezeOn: true, freezeLevel: 0.4 }),
     );
     expect(config.frozenLevel).toBeCloseTo(0.4);
+  });
+});
+
+describe("toSessionConfig — infinite mode (D-12, FR-50)", () => {
+  it("runs frozen at the infinite level with no decay", () => {
+    const config = toSessionConfig(setup({ mode: "infinite", infiniteLevel: 0.3 }));
+    expect(config.mode).toBe("infinite");
+    expect(config.decayEnabled).toBe(false);
+    expect(config.frozenLevel).toBeCloseTo(0.3);
+  });
+
+  it("clamps the infinite level into bounds", () => {
+    expect(toSessionConfig(setup({ mode: "infinite", infiniteLevel: 9 })).frozenLevel).toBe(
+      SETUP_BOUNDS.infiniteLevel.max,
+    );
+    expect(toSessionConfig(setup({ mode: "infinite", infiniteLevel: -1 })).frozenLevel).toBe(
+      SETUP_BOUNDS.infiniteLevel.min,
+    );
+  });
+});
+
+describe("menuModeConfig (D-14, FR-56)", () => {
+  it("maps the Wind-down tile to a live decaying session", () => {
+    const config = menuModeConfig("wind-down", setup({ durationMin: 60, startCeiling: 0.8 }));
+    expect(config.mode).toBe("live");
+    expect(config.decayEnabled).toBe(true);
+    expect(config.frozenLevel).toBeNull();
+    expect(config.durationMs).toBe(60 * 60_000);
+    expect(config.startCeiling).toBeCloseTo(0.8);
+  });
+
+  it("maps the Infinite tile to a frozen session at the saved calm level", () => {
+    const config = menuModeConfig("infinite", setup({ infiniteLevel: 0.25 }));
+    expect(config.mode).toBe("infinite");
+    expect(config.decayEnabled).toBe(false);
+    expect(config.frozenLevel).toBeCloseTo(0.25);
+  });
+
+  it("ignores any test toggles left in the saved state (FR-46)", () => {
+    const config = menuModeConfig(
+      "wind-down",
+      setup({ decayOff: true, freezeOn: true, freezeLevel: 0.9 }),
+    );
+    expect(config.mode).toBe("live");
+    expect(config.decayEnabled).toBe(true);
+    expect(config.frozenLevel).toBeNull();
   });
 });
 

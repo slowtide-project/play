@@ -22,16 +22,22 @@ import { createParentDefaultsStore } from "./platform/parent-defaults-store.js";
 import { createParentPinStore } from "./platform/parent-pin-store.js";
 import { applyDefaults, defaultsFromSetup } from "./parent/parent-defaults.js";
 import { openParentEntry } from "./parent/index.js";
-import { DEFAULT_SETUP, toSessionConfig } from "./parent/setup-config.js";
+import { menuModeConfig, type MenuMode } from "./parent/setup-config.js";
+import { createOpeningMenu } from "./menu/opening-menu.js";
 import { mountSurface, type SurfaceController } from "./render/index.js";
 import { createToyBox } from "./toys/index.js";
-import { isPreviewBuild, resolveDevMode } from "./platform/dev-mode.js";
+import { resolveDevMode } from "./platform/dev-mode.js";
+import { forceReloadLatest, setupAutoUpdate } from "./platform/app-update.js";
 
 // Whether the developer tools are active this launch: the compile-time preview
 // flag, or the hidden runtime unlock (`?dev=on`) on the deployed build. Resolved
 // once here, the single composition root, and threaded to the surface and the
 // toolbar below (see ./platform/dev-mode).
 const devTools = resolveDevMode();
+
+// Register the service worker and keep it fresh, so a new deploy is picked up on
+// the next launch/foreground without clearing Safari history by hand (NFR-8).
+setupAutoUpdate();
 
 /** How long the corner must be held to reveal the parent gate, in ms (FR-29). */
 const HOLD_TO_REVEAL_MS = 3000;
@@ -59,6 +65,11 @@ async function openEntry(): Promise<void> {
       initialSetup: applyDefaults(defaultsStore.load()),
       sessionActive: engine.isActive(Date.now()),
       pin: pinStore,
+      // Parent-gated manual force-update (NFR-7): the reliable backup for when a
+      // deploy should be pulled in immediately rather than on the next launch.
+      onCheckForUpdates: () => {
+        void forceReloadLatest();
+      },
     });
     if (result.action === "start") {
       engine.startSession(result.config, Date.now());
@@ -147,7 +158,9 @@ function mountHoldTarget(): HoldCue {
   } satisfies Partial<CSSStyleDeclaration>);
 
   const hint = document.createElement("span");
-  hint.textContent = "hold to begin";
+  // No words: begin is now via the menu tiles; this faint corner is only the
+  // parent's way into settings (FR-57), so it must not read as a child control.
+  hint.textContent = "";
   Object.assign(hint.style, {
     color: "rgba(231,236,245,0.32)",
     font: "500 12px/1 ui-sans-serif, system-ui, -apple-system, sans-serif",
@@ -272,9 +285,24 @@ function mountHoldTarget(): HoldCue {
 
 const holdCue = mountHoldTarget();
 
-// Wire the surface now that the cue exists: the surface reports when it enters
-// or leaves an active session (including a natural end when the duration
-// elapses), and the parent cue follows, showing only on the rest surface.
+/**
+ * Start a session from the opening menu (FR-1, FR-56): resolve the config for
+ * the chosen mode from the parent's saved defaults, begin a fresh session, and
+ * repaint. This is the child's route in; the detailed configuration behind it
+ * stays in the parent gate (FR-57).
+ */
+function startFromMenu(mode: MenuMode): void {
+  const saved = applyDefaults(defaultsStore.load());
+  engine.startSession(menuModeConfig(mode, saved), Date.now());
+  surface?.restart();
+}
+
+const openingMenu = createOpeningMenu(document.body, startFromMenu);
+
+// Wire the surface now that the cue and menu exist: the surface reports when it
+// enters or leaves an active session (including a natural end when a timed
+// session's duration elapses). The parent cue and the opening menu both follow,
+// showing only on the rest surface (FR-7).
 surface =
   app === null
     ? null
@@ -283,7 +311,11 @@ surface =
         engine,
         () => Date.now(),
         createToyBox(),
-        (active) => holdCue.setResting(!active),
+        (active) => {
+          holdCue.setResting(!active);
+          if (active) openingMenu.hide();
+          else openingMenu.show();
+        },
         devTools,
       );
 
@@ -293,20 +325,13 @@ surface =
 // deployed build `devTools` is false, so this whole block is inert and the app
 // rests neutral until the parent gate (FR-1b).
 //
-// Auto-start into the forest is a *local inspection* convenience only and stays
-// behind the compile-time flag alone: it must never happen on a deployed/child
-// device, so unlocking dev tools at runtime gives the toolbar and readout but
-// still leaves the app resting neutral behind the parent gate (FR-1b).
+// Every launch, dev or not, rests on the opening menu (FR-1b, FR-7): a session
+// begins only from a menu tile or the parent setup. There is deliberately no
+// auto-start into a scene — the menu must be the first thing anyone sees (D-14).
 if (devTools && surface !== null) {
   // `surface` is a mutable binding, so capture the non-null value for the button
   // callbacks below (which would otherwise see it as possibly null).
   const surf = surface;
-  if (isPreviewBuild()) {
-    // Preview build only: drop straight into the forest so there is no dev dance
-    // to see the scene. Never on the deployed build (FR-1b).
-    engine.startSession(toSessionConfig(DEFAULT_SETUP), Date.now());
-    surf.restart();
-  }
 
   const styleBtn = (b: HTMLButtonElement): void => {
     Object.assign(b.style, {

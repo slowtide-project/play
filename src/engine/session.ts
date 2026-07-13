@@ -40,6 +40,10 @@ function phaseFor(progress: number): Phase {
 
 /** The arousal budget for a record at a given elapsed time. Pure. */
 function computeBudget(record: SessionRecord, elapsed: number): number {
+  if (record.mode === "infinite") {
+    // Frozen at the parent-set calm level for the whole session; no decay (D-12).
+    return clamp(record.frozenLevel ?? record.startCeiling, 0, 1);
+  }
   if (record.mode === "test") {
     if (record.frozenLevel !== null) return clamp(record.frozenLevel, 0, 1);
     if (!record.decayEnabled) return clamp(record.startCeiling, 0, 1);
@@ -90,6 +94,21 @@ export function createEngine(storage: Storage): Engine {
 
     const elapsed = now - record.startEpoch;
     if (!Number.isFinite(elapsed) || elapsed < 0) return inactiveState("neutral");
+
+    // Infinite mode has no natural end (D-12, FR-50): it stays active until the
+    // parent ends it, so it never expires on elapsed time. Timed modes end once
+    // their duration has passed (FR-6).
+    if (record.mode === "infinite") {
+      const budget = computeBudget(record, elapsed);
+      return {
+        status: "active",
+        budget,
+        phase: null,
+        progress: null,
+        levers: mapLevers(budget, record.ceilings),
+      };
+    }
+
     if (elapsed >= record.durationMs) return inactiveState("ended");
 
     const budget = computeBudget(record, elapsed);

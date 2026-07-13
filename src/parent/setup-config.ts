@@ -35,6 +35,8 @@ export const SETUP_BOUNDS = {
   ceiling: { min: 0, max: 1 },
   /** Frozen test level, 0..1 (FR-44). */
   frozenLevel: { min: 0, max: 1 },
+  /** Infinite-mode frozen level, 0..1 (D-12, FR-50). */
+  infiniteLevel: { min: 0, max: 1 },
 } as const satisfies Record<string, Bounds>;
 
 /**
@@ -57,6 +59,8 @@ export interface SetupState {
   /** Test mode: freeze the budget at {@link freezeLevel} (FR-44). */
   readonly freezeOn: boolean;
   readonly freezeLevel: number;
+  /** Infinite mode: the frozen calm level a tapped Infinite tile runs at (D-12, FR-50). */
+  readonly infiniteLevel: number;
 }
 
 /** A full-intensity 90-minute live session: the safe, unconfigured baseline. */
@@ -71,6 +75,7 @@ export const DEFAULT_SETUP: SetupState = {
   decayOff: false,
   freezeOn: false,
   freezeLevel: 0.5,
+  infiniteLevel: 0.3,
 };
 
 /** Clamp a value into bounds, falling back to the low bound if non-finite (I-5). */
@@ -104,10 +109,33 @@ export function toSessionConfig(state: SetupState): SessionConfig {
     return { ...base, mode: "live", decayEnabled: true, frozenLevel: null };
   }
 
+  if (state.mode === "infinite") {
+    // Frozen at the parent-set calm level, no decay, no end (D-12, FR-50).
+    return {
+      ...base,
+      mode: "infinite",
+      decayEnabled: false,
+      frozenLevel: clampToBounds(state.infiniteLevel, SETUP_BOUNDS.infiniteLevel),
+    };
+  }
+
   return {
     ...base,
     mode: "test",
     decayEnabled: !state.decayOff,
     frozenLevel: state.freezeOn ? clampToBounds(state.freezeLevel, SETUP_BOUNDS.frozenLevel) : null,
   };
+}
+
+/** The two child-facing modes offered on the opening menu (D-14, FR-55). */
+export type MenuMode = "wind-down" | "infinite";
+
+/**
+ * Resolve the session config a tapped menu tile starts, from the parent's
+ * saved settings (FR-56). Wind-down runs the live decay curve; Infinite runs
+ * frozen at the saved calm level. Neither exposes the test toggles.
+ */
+export function menuModeConfig(mode: MenuMode, saved: SetupState): SessionConfig {
+  const base: SetupState = { ...saved, decayOff: false, freezeOn: false };
+  return toSessionConfig({ ...base, mode: mode === "infinite" ? "infinite" : "live" });
 }
