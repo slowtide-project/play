@@ -94,6 +94,14 @@ const STYLE = `
 }
 .${PARENT_ROOT_CLASS}-build { color: #8a94ad; font-size: 12px; font-variant-numeric: tabular-nums; }
 .${PARENT_ROOT_CLASS}-foot .st-parent-btn:disabled { opacity: 0.6; cursor: default; }
+.${PARENT_ROOT_CLASS}-advanced { margin: 12px 0 0; border-top: 1px solid #232a3f; padding-top: 6px; }
+.${PARENT_ROOT_CLASS}-advanced > summary {
+  cursor: pointer; color: #9fb0d0; font-size: 14px; font-weight: 600;
+  list-style: none; padding: 10px 0; user-select: none; -webkit-user-select: none;
+}
+.${PARENT_ROOT_CLASS}-advanced > summary::-webkit-details-marker { display: none; }
+.${PARENT_ROOT_CLASS}-advanced > summary::before { content: "\\25B8"; color: #7fd1ff; margin-right: 8px; }
+.${PARENT_ROOT_CLASS}-advanced[open] > summary::before { content: "\\25BE"; }
 `;
 
 /** Inject the shared parent stylesheet once. */

@@ -20,6 +20,7 @@ import { createEngine } from "./engine/index.js";
 import { createLocalStorage } from "./platform/local-storage.js";
 import { createParentDefaultsStore } from "./platform/parent-defaults-store.js";
 import { createParentPinStore } from "./platform/parent-pin-store.js";
+import { createMenuSetupStore } from "./platform/menu-setup-store.js";
 import { applyDefaults, defaultsFromSetup } from "./parent/parent-defaults.js";
 import { openParentEntry } from "./parent/index.js";
 import { menuModeConfig, type MenuMode } from "./parent/setup-config.js";
@@ -39,12 +40,23 @@ const devTools = resolveDevMode();
 // the next launch/foreground without clearing Safari history by hand (NFR-8).
 setupAutoUpdate();
 
-/** How long the corner must be held to reveal the parent gate, in ms (FR-29). */
+/** How long the fill takes to complete once the hold has activated, in ms (FR-29). */
 const HOLD_TO_REVEAL_MS = 3000;
+
+/**
+ * A silent dead time at the very start of a press: nothing is shown and nothing
+ * begins filling until the corner has been held continuously for this long. A
+ * child's casual tap, poke, or brush gets no feedback at all, so there is
+ * nothing to notice or probe; only a deliberate sustained hold crosses it and
+ * starts the reveal (FR-29, NFR-1, NFR-3). Total time to open is this plus
+ * {@link HOLD_TO_REVEAL_MS}.
+ */
+const HOLD_ACTIVATION_MS = 700;
 
 const engine = createEngine(createLocalStorage());
 const defaultsStore = createParentDefaultsStore();
 const pinStore = createParentPinStore();
+const menuSetupStore = createMenuSetupStore();
 
 const app = document.getElementById("app");
 
@@ -95,13 +107,17 @@ interface HoldCue {
  * does nothing, keeping it out of a child's reach (FR-29). It sits opposite the
  * child's home button, which lives in the top-left.
  *
- * On the rest surface it carries a faint, parent-only cue: a dim ring that
- * fills as the corner is held, next to a low-contrast "hold to begin" hint, so
- * an adult can find the way in on a first launch instead of facing a blank
- * screen. The cue is deliberately quiet and non-playful, and is hidden entirely
- * during an active session, so the child is never shown anything that invites
- * play or reveals the wind-down (FR-7, NFR-1). The filling ring reflects the
- * hold gesture only, never session progress.
+ * On the rest surface it carries a faint, parent-only cue: a dim ring with a
+ * centre dot marking where to press, so an adult can find the way in on a first
+ * launch instead of facing a blank screen. A press does nothing at all for a
+ * short dead time ({@link HOLD_ACTIVATION_MS}), so a child's tap or brush gets no
+ * feedback to notice or probe; only once a deliberate hold crosses that delay
+ * does an expanding ripple grow outward from the exact touch point and past the
+ * finger, so the person holding can see how far the gesture has progressed even
+ * with a thumb over the corner. The cue is deliberately quiet and non-playful, and is
+ * hidden entirely during an active session, so the child is never shown anything
+ * that invites play or reveals the wind-down (FR-7, NFR-1). The ripple reflects
+ * the hold gesture only, never session progress.
  */
 function mountHoldTarget(): HoldCue {
   const SVG_NS = "http://www.w3.org/2000/svg";
@@ -168,37 +184,85 @@ function mountHoldTarget(): HoldCue {
     whiteSpace: "nowrap",
   } satisfies Partial<CSSStyleDeclaration>);
 
+  // The resting handle: a faint static ring with a centre dot, so a parent can
+  // find the corner on a blank first-launch surface. It no longer shows hold
+  // progress itself (that is the ripple below); it is only a "start here" mark.
   const R = 16;
-  const CIRC = 2 * Math.PI * R;
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("width", "40");
   svg.setAttribute("height", "40");
   svg.setAttribute("viewBox", "0 0 44 44");
   const base = document.createElementNS(SVG_NS, "circle");
-  const arc = document.createElementNS(SVG_NS, "circle");
-  for (const ring of [base, arc]) {
-    ring.setAttribute("cx", "22");
-    ring.setAttribute("cy", "22");
-    ring.setAttribute("r", String(R));
-    ring.setAttribute("fill", "none");
-    ring.setAttribute("stroke-width", "2");
-    ring.setAttribute("stroke-linecap", "round");
-  }
+  base.setAttribute("cx", "22");
+  base.setAttribute("cy", "22");
+  base.setAttribute("r", String(R));
+  base.setAttribute("fill", "none");
+  base.setAttribute("stroke-width", "2");
+  base.setAttribute("stroke-linecap", "round");
   base.setAttribute("stroke", "rgba(231,236,245,0.16)");
-  arc.setAttribute("stroke", "rgba(231,236,245,0.72)");
-  arc.setAttribute("stroke-dasharray", String(CIRC));
-  arc.setAttribute("stroke-dashoffset", String(CIRC));
-  arc.setAttribute("transform", "rotate(-90 22 22)");
   const dot = document.createElementNS(SVG_NS, "circle");
   dot.setAttribute("cx", "22");
   dot.setAttribute("cy", "22");
   dot.setAttribute("r", "2.5");
   dot.setAttribute("fill", "rgba(231,236,245,0.5)");
-  svg.append(base, arc, dot);
+  svg.append(base, dot);
 
   cue.append(hint, svg);
   target.append(cue);
   document.body.append(target);
+
+  // Hold feedback fills *outward* from under the finger rather than around a
+  // ring's circumference: a fingertip covers the corner ring, so a circumference
+  // fill is invisible to the person doing the hold. Instead an expanding ripple
+  // is centred on the exact touch point and grows past the fingertip, so the
+  // leading edge clears the thumb and the parent sees how far the hold has got.
+  // RIPPLE_MAX is comfortably wider than a thumb's contact patch for this reason.
+  // This reflects the hold gesture only, never session progress (NFR-1), and is
+  // shown even under reduced motion since it is functional feedback, not decor.
+  const RIPPLE_MIN = 12;
+  const RIPPLE_MAX = 92;
+  const RIPPLE_BOX = RIPPLE_MAX * 2 + 8;
+  const RIPPLE_C = RIPPLE_BOX / 2;
+  const ripple = document.createElementNS(SVG_NS, "svg");
+  ripple.setAttribute("width", String(RIPPLE_BOX));
+  ripple.setAttribute("height", String(RIPPLE_BOX));
+  ripple.setAttribute("viewBox", `0 0 ${RIPPLE_BOX} ${RIPPLE_BOX}`);
+  ripple.setAttribute("aria-hidden", "true");
+  Object.assign(ripple.style, {
+    position: "fixed",
+    left: "0",
+    top: "0",
+    // Parked off-screen until a hold begins; positioned on pointerdown.
+    transform: "translate(-9999px, -9999px)",
+    opacity: "0",
+    transition: "opacity 160ms ease",
+    pointerEvents: "none",
+    zIndex: "11",
+  } satisfies Partial<CSSStyleDeclaration>);
+  // A static outer target ring at the completion radius: the goal the growing
+  // fill is racing toward. Seeing the gap between the expanding edge and this
+  // ring tells the parent how close the menu is to opening. Fainter than the
+  // moving edge so the fill reads as the active element.
+  const rippleTarget = document.createElementNS(SVG_NS, "circle");
+  rippleTarget.setAttribute("cx", String(RIPPLE_C));
+  rippleTarget.setAttribute("cy", String(RIPPLE_C));
+  rippleTarget.setAttribute("r", String(RIPPLE_MAX));
+  rippleTarget.setAttribute("fill", "none");
+  rippleTarget.setAttribute("stroke", "rgba(231,236,245,0.22)");
+  rippleTarget.setAttribute("stroke-width", "1.5");
+  const rippleFill = document.createElementNS(SVG_NS, "circle");
+  const rippleEdge = document.createElementNS(SVG_NS, "circle");
+  for (const c of [rippleFill, rippleEdge]) {
+    c.setAttribute("cx", String(RIPPLE_C));
+    c.setAttribute("cy", String(RIPPLE_C));
+    c.setAttribute("r", String(RIPPLE_MIN));
+  }
+  rippleFill.setAttribute("fill", "rgba(231,236,245,0.10)");
+  rippleEdge.setAttribute("fill", "none");
+  rippleEdge.setAttribute("stroke", "rgba(231,236,245,0.80)");
+  rippleEdge.setAttribute("stroke-width", "2.5");
+  ripple.append(rippleTarget, rippleFill, rippleEdge);
+  document.body.append(ripple);
 
   let resting = false;
 
@@ -225,8 +289,24 @@ function mountHoldTarget(): HoldCue {
   // across the hold and opens the gate when it completes.
   let holdRaf = 0;
   let holdStart = 0;
-  const setArc = (progress: number): void => {
-    arc.setAttribute("stroke-dashoffset", String(CIRC * (1 - progress)));
+  let holdX = 0;
+  let holdY = 0;
+  let activated = false;
+  // Grow the ripple radius with progress so the leading edge sweeps outward from
+  // the touch point; at progress 1 it reaches RIPPLE_MAX, well past the finger.
+  const setProgress = (progress: number): void => {
+    const r = RIPPLE_MIN + (RIPPLE_MAX - RIPPLE_MIN) * progress;
+    rippleFill.setAttribute("r", String(r));
+    rippleEdge.setAttribute("r", String(r));
+  };
+  const hideRipple = (): void => {
+    ripple.style.opacity = "0";
+    ripple.style.transform = "translate(-9999px, -9999px)";
+    setProgress(0);
+  };
+  const placeRipple = (x: number, y: number): void => {
+    ripple.style.transform = `translate(${x - RIPPLE_C}px, ${y - RIPPLE_C}px)`;
+    ripple.style.opacity = "1";
   };
   // pointerdown forces the cue visible for hold feedback; when the hold ends we
   // must return it to the visibility its resting state dictates. Without this the
@@ -240,16 +320,33 @@ function mountHoldTarget(): HoldCue {
       window.cancelAnimationFrame(holdRaf);
       holdRaf = 0;
     }
-    setArc(0);
+    activated = false;
+    hideRipple();
     settleCueOpacity();
     if (resting) startPulse();
   };
   const tickHold = (nowMs: number): void => {
-    const progress = Math.min(1, (nowMs - holdStart) / HOLD_TO_REVEAL_MS);
-    setArc(progress);
+    const held = nowMs - holdStart;
+    // Dead time: hold recognised but nothing shown yet. A press released in here
+    // leaves no trace, so a stray tap never reveals that anything is there.
+    if (held < HOLD_ACTIVATION_MS) {
+      holdRaf = window.requestAnimationFrame(tickHold);
+      return;
+    }
+    // First frame past the dead time: the hold has proven deliberate, so now
+    // bring up the ripple under the finger and quiet the resting cue's breath.
+    if (!activated) {
+      activated = true;
+      stopPulse();
+      cue.style.opacity = "1";
+      placeRipple(holdX, holdY);
+    }
+    const progress = Math.min(1, (held - HOLD_ACTIVATION_MS) / HOLD_TO_REVEAL_MS);
+    setProgress(progress);
     if (progress >= 1) {
       holdRaf = 0;
-      setArc(0);
+      activated = false;
+      hideRipple();
       settleCueOpacity();
       void openEntry();
       return;
@@ -260,8 +357,10 @@ function mountHoldTarget(): HoldCue {
   target.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     if (holdRaf !== 0) return;
-    stopPulse();
-    cue.style.opacity = "1";
+    // Record where the press landed but show nothing yet: the ripple only
+    // appears once the dead time elapses (see tickHold).
+    holdX = event.clientX;
+    holdY = event.clientY;
     holdStart = performance.now();
     holdRaf = window.requestAnimationFrame(tickHold);
   });
@@ -285,16 +384,61 @@ function mountHoldTarget(): HoldCue {
 
 const holdCue = mountHoldTarget();
 
-/**
- * Start a session from the opening menu (FR-1, FR-56): resolve the config for
- * the chosen mode from the parent's saved defaults, begin a fresh session, and
- * repaint. This is the child's route in; the detailed configuration behind it
- * stays in the parent gate (FR-57).
- */
-function startFromMenu(mode: MenuMode): void {
+/** Begin a session in the tapped menu mode from the saved defaults, and repaint. */
+function startSavedSession(mode: MenuMode): void {
   const saved = applyDefaults(defaultsStore.load());
   engine.startSession(menuModeConfig(mode, saved), Date.now());
   surface?.restart();
+}
+
+/**
+ * A tile's first-ever use (D-14): before that first session runs, take the
+ * parent through the gate and setup so they configure the mode (and, on a fresh
+ * install, set the PIN) rather than starting on bare defaults. On confirm, save
+ * the chosen values as pre-fills, remember that this tile is now configured, and
+ * start the session in the tapped mode. A cancelled gate or setup leaves the app
+ * resting on the menu, unchanged, and the tile stays "first-run" for next time.
+ */
+async function openMenuSetup(mode: MenuMode): Promise<void> {
+  if (entryOpen) return;
+  entryOpen = true;
+  try {
+    const result = await openParentEntry(document.body, {
+      initialSetup: applyDefaults(defaultsStore.load()),
+      sessionActive: engine.isActive(Date.now()),
+      pin: pinStore,
+      focus: mode,
+      onCheckForUpdates: () => {
+        void forceReloadLatest();
+      },
+    });
+    if (result.action === "start") {
+      defaultsStore.save(defaultsFromSetup(result.setup));
+      menuSetupStore.markConfigured(mode);
+      engine.startSession(menuModeConfig(mode, result.setup), Date.now());
+      surface?.restart();
+    } else if (result.action === "end") {
+      engine.endSession();
+      surface?.sync();
+    }
+  } finally {
+    entryOpen = false;
+  }
+}
+
+/**
+ * Start a session from the opening menu (FR-1, FR-56). The first time each tile
+ * is used it routes through parent setup first (D-14, {@link openMenuSetup});
+ * after that, tapping the tile starts immediately from the saved defaults, so
+ * daily use stays child-simple and the detailed configuration stays behind the
+ * parent gate (FR-57).
+ */
+function startFromMenu(mode: MenuMode): void {
+  if (menuSetupStore.isConfigured(mode)) {
+    startSavedSession(mode);
+    return;
+  }
+  void openMenuSetup(mode);
 }
 
 const openingMenu = createOpeningMenu(document.body, startFromMenu);

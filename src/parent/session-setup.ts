@@ -9,11 +9,12 @@
  * valid {@link SessionConfig}.
  */
 
-import { createOverlay, el } from "./overlay.js";
+import { createOverlay, el, PARENT_ROOT_CLASS } from "./overlay.js";
 import {
   DURATION_PRESETS_MIN,
   SETUP_BOUNDS,
   toSessionConfig,
+  type MenuMode,
   type SetupState,
 } from "./setup-config.js";
 import type { SessionConfig } from "../engine/index.js";
@@ -34,6 +35,13 @@ export interface SetupContext {
    * provided, a "Check for updates" control and the build stamp are shown.
    */
   readonly onCheckForUpdates?: (() => void) | undefined;
+  /**
+   * Which tile this setup is for (D-14). It decides the single control shown at
+   * the top level: Duration for `wind-down`, Calm level for `infinite`. When
+   * omitted (the parent-corner "settings" entry) both are shown, along with test
+   * mode under Advanced. Everything not featured here folds under Advanced.
+   */
+  readonly focus?: MenuMode | undefined;
 }
 
 type Mutable = { -readonly [K in keyof SetupState]: SetupState[K] };
@@ -201,14 +209,14 @@ export function openSessionSetup(
 
   // ---- Infinite mode default ---------------------------------------------
   const infiniteSet = el("fieldset", "st-parent-fieldset");
-  infiniteSet.append(el("legend", undefined, "Infinite mode"));
+  infiniteSet.append(el("legend", undefined, "Anytime"));
   const infiniteLevel = slider(
     "Calm level",
     SETUP_BOUNDS.infiniteLevel,
     0.01,
     state.infiniteLevel,
     pct,
-    "How lively the Infinite tile runs. It holds steady here and never winds down.",
+    "How lively Anytime runs. It holds steady at this level and never winds down.",
   );
   infiniteLevel.input.addEventListener("input", () => {
     state.infiniteLevel = infiniteLevel.input.valueAsNumber;
@@ -274,6 +282,7 @@ export function openSessionSetup(
     endBtn.addEventListener("click", () => settle({ action: "end" }));
     actions.append(endBtn);
   }
+  // Change PIN moves under Advanced (below), not the main action row.
   const pinBtn = el("button", "st-parent-btn", "Change PIN");
   pinBtn.type = "button";
   pinBtn.addEventListener("click", () => settle({ action: "changePin" }));
@@ -286,7 +295,7 @@ export function openSessionSetup(
     const snapshot: SetupState = { ...state };
     settle({ action: "start", config: toSessionConfig(snapshot), setup: snapshot });
   });
-  actions.append(pinBtn, cancelBtn, startBtn);
+  actions.append(cancelBtn, startBtn);
 
   // ---- Footer: build stamp + manual force-update (parent-gated) -----------
   // Lives here, behind the gate, never on the child menu (NFR-7, D-14). The
@@ -312,19 +321,34 @@ export function openSessionSetup(
   }
   document.addEventListener("keydown", onKeydown);
 
-  overlay.card.append(
-    title,
-    sub,
-    modeField,
-    durationField,
-    startCeiling.root,
-    steepness.root,
-    ceilingSet,
-    infiniteSet,
-    testSet,
-    actions,
-  );
-  if (footer !== null) overlay.card.append(footer);
+  // ---- Assemble: minimal top level, everything else under Advanced (D-14) --
+  // The everyday screen shows only the one control that matters for the tapped
+  // tile — Duration for Wind-down, Calm level for Anytime — plus Start. All the
+  // tuning, test mode, PIN change and update controls fold under Advanced so a
+  // parent is not met with a wall of sliders (NFR-7). Section 7's mitigations
+  // (start intensity, steepness, ceilings) and test mode (D-5) still live here,
+  // one tap away, never removed. With no focus (the parent-corner settings
+  // entry) both everyday controls and test mode are shown.
+  const focus = context.focus;
+  const showDuration = focus !== "infinite";
+  const showCalm = focus !== "wind-down";
+  const showCurve = focus !== "infinite";
+  const showTest = focus === undefined;
+
+  const advanced = el("details", `${PARENT_ROOT_CLASS}-advanced`);
+  advanced.append(el("summary", undefined, "Advanced options"));
+  if (showCurve) advanced.append(startCeiling.root, steepness.root);
+  advanced.append(ceilingSet);
+  if (showTest) advanced.append(modeField, testSet);
+  const pinRow = el("div", "st-parent-row");
+  pinRow.append(pinBtn);
+  advanced.append(pinRow);
+  if (footer !== null) advanced.append(footer);
+
+  overlay.card.append(title, sub);
+  if (showDuration) overlay.card.append(durationField);
+  if (showCalm) overlay.card.append(infiniteSet);
+  overlay.card.append(advanced, actions);
   applyMode();
 
   return result;

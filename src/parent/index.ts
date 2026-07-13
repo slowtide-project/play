@@ -10,7 +10,7 @@
 
 import { openParentGate } from "./parent-gate.js";
 import { openSessionSetup, type SetupResult } from "./session-setup.js";
-import type { SetupState } from "./setup-config.js";
+import type { MenuMode, SetupState } from "./setup-config.js";
 import type { PinPort } from "./parent-pin.js";
 
 export type { SetupResult } from "./session-setup.js";
@@ -32,6 +32,11 @@ export interface ParentEntryOptions {
    * provided, setup shows a "Check for updates" control; omitted in tests.
    */
   readonly onCheckForUpdates?: (() => void) | undefined;
+  /**
+   * Which tile this entry configures (D-14), passed through to setup to decide
+   * the single top-level control. Omitted for the parent-corner settings entry.
+   */
+  readonly focus?: MenuMode | undefined;
 }
 
 /**
@@ -50,6 +55,7 @@ export async function openParentEntry(
     const result = await openSessionSetup(host, options.initialSetup, {
       sessionActive: options.sessionActive,
       onCheckForUpdates: options.onCheckForUpdates,
+      focus: options.focus,
     });
     if (result.action !== "changePin") return result;
     // Re-verify by setting a new PIN, then return to setup either way.
