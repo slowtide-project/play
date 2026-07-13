@@ -25,23 +25,22 @@
       body {
         margin: 0;
         height: 100%;
-        /* Dynamic viewport unit covers the full screen on iOS standalone,
-           including under the status bar and home indicator, so the scene is
-           edge-to-edge with no black band at the bottom. */
-        min-height: 100dvh;
-        background: #0b0d1a;
+        /* On iOS standalone with a black-translucent status bar, iOS reserves the
+           bottom home-indicator inset and will not composite web content there;
+           that region shows this page background instead. So we keep it matched to
+           the scene's bottom edge (updated live from JS) to hide the seam. This
+           warm dark is the starting value for the rest surface before play. */
+        background: hsl(24 22% 4%);
         overflow: hidden;
         overscroll-behavior: none;
         touch-action: none;
       }
-      /* The child surface fills the whole screen, safe areas included; the canvas
-         is positioned within it and draws full-bleed (the scene is meant to run
-         under the island and home indicator). Interactive chrome is inset in JS. */
+      /* The child surface fills the layout viewport; the canvas is positioned
+         within it and draws full-bleed. The bottom home-indicator inset that iOS
+         will not paint into is covered by the matched page background above. */
       #app {
         position: fixed;
         inset: 0;
-        width: 100%;
-        height: 100dvh;
       }
     </style>
   </head>

@@ -198,6 +198,27 @@ export function mountSurface(
     gradient.addColorStop(1, "hsl(24 22% 4%)");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
+    syncEdgeColour(true);
+  }
+
+  // On iOS standalone with a black-translucent status bar, iOS reserves the
+  // bottom home-indicator inset and will not composite web content into it; the
+  // page background shows through there instead (see index.html). Keep that page
+  // background matched to the colour at the very bottom of the surface so the
+  // seam is invisible. getImageData forces a GPU→CPU readback, so this is
+  // throttled well below the frame rate.
+  let lastEdgeSample = 0;
+  function syncEdgeColour(force: boolean): void {
+    const wall = now();
+    if (!force && wall - lastEdgeSample < 600) return;
+    lastEdgeSample = wall;
+    if (ctx === null || canvas.width === 0 || canvas.height === 0) return;
+    try {
+      const px = ctx.getImageData(canvas.width >> 1, canvas.height - 1, 1, 1).data;
+      document.body.style.background = `rgb(${px[0]}, ${px[1]}, ${px[2]})`;
+    } catch {
+      // getImageData can throw on tainted canvases or in non-browser test stubs.
+    }
   }
 
   function drawActive(ts: number): void {
@@ -223,6 +244,7 @@ export function mountSurface(
       perfSamples.push(perfNow() - drawStart);
       if (perfSamples.length > 60) perfSamples.shift();
     }
+    syncEdgeColour(false);
   }
 
   /** Dev-only: recent median draw time and the current fps cap, for the toolbar. */
