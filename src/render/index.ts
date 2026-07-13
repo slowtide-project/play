@@ -2,4 +2,4 @@
 
 export { mountSurface } from "./surface.js";
 export type { SurfaceController } from "./surface.js";
-export type { Toy, ToyFrame, ToyPointer } from "./types.js";
+export type { SafeInsets, Toy, ToyFrame, ToyPointer } from "./types.js";

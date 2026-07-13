@@ -72,7 +72,9 @@ export default defineConfig(({ command }) => ({
         short_name: "Slowtide",
         description: "A calm, parent-set bedtime wind-down.",
         display: "fullscreen",
-        orientation: "landscape",
+        // Follow the device rather than locking to landscape, so the app also
+        // runs correctly in portrait on a phone (the layout is safe-area aware).
+        orientation: "any",
         background_color: "#0b0d1a",
         theme_color: "#0b0d1a",
         // Icons are placeholders; replace with final artwork before release.

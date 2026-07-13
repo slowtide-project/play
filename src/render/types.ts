@@ -10,6 +10,14 @@
 
 import type { LeverValues, Phase } from "../engine/index.js";
 
+/** Safe-area insets in CSS pixels, from the device's non-content edges. */
+export interface SafeInsets {
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly left: number;
+}
+
 /** A pointer interaction, in CSS pixels relative to the canvas. */
 export interface ToyPointer {
   readonly type: "down" | "move" | "up";
@@ -40,6 +48,13 @@ export interface ToyFrame {
   readonly phase: Phase | null;
   /** True when the user has asked for reduced motion (NFR-5, WCAG 2.3). */
   readonly reducedMotion: boolean;
+  /**
+   * Safe-area insets in CSS pixels (Dynamic Island / home indicator). The scene
+   * itself draws full-bleed, but any on-canvas chrome (e.g. the home pebble)
+   * must sit inside these so it clears the island in portrait. Optional, with a
+   * sensible zero default where a caller omits it (e.g. off-device tests).
+   */
+  readonly safeInsets?: SafeInsets;
   /**
    * The (capped) device-pixel-ratio the surface is rendering at. Optional, with
    * a sensible default of 1 where a caller omits it, so a toy can allocate any

@@ -12,19 +12,36 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Slowtide</title>
     <style>
+      /* Safe-area insets, exposed as variables so both CSS and JS (via a probe)
+         can respect the Dynamic Island / home indicator on notched devices.
+         viewport-fit=cover (see the viewport meta) is what makes these non-zero. */
+      :root {
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-right: env(safe-area-inset-right, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-left: env(safe-area-inset-left, 0px);
+      }
       html,
       body {
         margin: 0;
         height: 100%;
+        /* Dynamic viewport unit covers the full screen on iOS standalone,
+           including under the status bar and home indicator, so the scene is
+           edge-to-edge with no black band at the bottom. */
+        min-height: 100dvh;
         background: #0b0d1a;
         overflow: hidden;
         overscroll-behavior: none;
         touch-action: none;
       }
-      /* The child surface fills the viewport; the canvas is positioned within it. */
+      /* The child surface fills the whole screen, safe areas included; the canvas
+         is positioned within it and draws full-bleed (the scene is meant to run
+         under the island and home indicator). Interactive chrome is inset in JS. */
       #app {
         position: fixed;
         inset: 0;
+        width: 100%;
+        height: 100dvh;
       }
     </style>
   </head>

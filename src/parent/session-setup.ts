@@ -23,6 +23,7 @@ const TITLE_ID = "st-parent-setup-title";
 export type SetupResult =
   | { readonly action: "start"; readonly config: SessionConfig; readonly setup: SetupState }
   | { readonly action: "end" }
+  | { readonly action: "changePin" }
   | { readonly action: "cancel" };
 
 export interface SetupContext {
@@ -251,6 +252,9 @@ export function openSessionSetup(
     endBtn.addEventListener("click", () => settle({ action: "end" }));
     actions.append(endBtn);
   }
+  const pinBtn = el("button", "st-parent-btn", "Change PIN");
+  pinBtn.type = "button";
+  pinBtn.addEventListener("click", () => settle({ action: "changePin" }));
   const cancelBtn = el("button", "st-parent-btn", "Cancel");
   cancelBtn.type = "button";
   cancelBtn.addEventListener("click", () => settle({ action: "cancel" }));
@@ -260,7 +264,7 @@ export function openSessionSetup(
     const snapshot: SetupState = { ...state };
     settle({ action: "start", config: toSessionConfig(snapshot), setup: snapshot });
   });
-  actions.append(cancelBtn, startBtn);
+  actions.append(pinBtn, cancelBtn, startBtn);
 
   function onKeydown(event: KeyboardEvent): void {
     if (event.key === "Escape") settle({ action: "cancel" });

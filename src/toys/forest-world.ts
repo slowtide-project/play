@@ -1100,12 +1100,6 @@ export function createForestWorld(): Toy {
 
       paintVignette(ctx, dpr);
 
-      ctx.fillStyle = css([255, 255, 255], 0.18 + 0.12 * frame.budget);
-      ctx.font = `${Math.round(Math.min(width, height) * 0.02)}px system-ui, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillText("S L O W T I D E", width / 2, height * 0.04);
-
       const veil = (1 - frame.levers.brightness) * 0.5;
       if (veil > 0.01) {
         ctx.fillStyle = css([10, 12, 24], veil);

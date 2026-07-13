@@ -73,6 +73,42 @@ export function mountSurface(
   host.append(canvas);
   const ctx = canvas.getContext("2d");
 
+  // Safe-area insets (Dynamic Island / home indicator). `env()` only resolves in
+  // CSS, so a zero-size hidden probe carries the insets as padding and we read
+  // the resolved pixels back off it. The scene draws full-bleed; these are for
+  // on-canvas chrome (e.g. the home pebble) to sit clear of the island.
+  const insetProbe = document.createElement("div");
+  Object.assign(insetProbe.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    width: "0",
+    height: "0",
+    visibility: "hidden",
+    pointerEvents: "none",
+    paddingTop: "env(safe-area-inset-top, 0px)",
+    paddingRight: "env(safe-area-inset-right, 0px)",
+    paddingBottom: "env(safe-area-inset-bottom, 0px)",
+    paddingLeft: "env(safe-area-inset-left, 0px)",
+  } satisfies Partial<CSSStyleDeclaration>);
+  host.append(insetProbe);
+  let safeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  function readSafeInsets(): void {
+    try {
+      const cs = window.getComputedStyle(insetProbe);
+      safeInsets = {
+        top: parseFloat(cs.paddingTop) || 0,
+        right: parseFloat(cs.paddingRight) || 0,
+        bottom: parseFloat(cs.paddingBottom) || 0,
+        left: parseFloat(cs.paddingLeft) || 0,
+      };
+    } catch {
+      // Off-device (e.g. tests) where getComputedStyle is unavailable: keep the
+      // zero insets, which is correct for a screen with no island / indicator.
+      safeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+    }
+  }
+
   let width = 0;
   let height = 0;
   let running = false;
@@ -105,6 +141,7 @@ export function mountSurface(
    * when something actually changed.
    */
   function resize(): void {
+    readSafeInsets();
     const dpr = clampDevicePixelRatio(window.devicePixelRatio || 1);
     const rect = host.getBoundingClientRect();
     const w = Math.max(1, Math.round(rect.width));
@@ -180,6 +217,7 @@ export function mountSurface(
       phase: state.phase,
       reducedMotion: prefersReducedMotion(),
       dpr: deviceRatio,
+      safeInsets,
     });
     if (devMeter) {
       perfSamples.push(perfNow() - drawStart);
@@ -331,6 +369,7 @@ export function mountSurface(
       document.removeEventListener("visibilitychange", onVisibility);
       if (resizeTimer !== 0) window.clearTimeout(resizeTimer);
       canvas.remove();
+      insetProbe.remove();
     },
   };
 }

@@ -19,6 +19,7 @@
 import { createEngine } from "./engine/index.js";
 import { createLocalStorage } from "./platform/local-storage.js";
 import { createParentDefaultsStore } from "./platform/parent-defaults-store.js";
+import { createParentPinStore } from "./platform/parent-pin-store.js";
 import { applyDefaults, defaultsFromSetup } from "./parent/parent-defaults.js";
 import { openParentEntry } from "./parent/index.js";
 import { DEFAULT_SETUP, toSessionConfig } from "./parent/setup-config.js";
@@ -37,6 +38,7 @@ const HOLD_TO_REVEAL_MS = 3000;
 
 const engine = createEngine(createLocalStorage());
 const defaultsStore = createParentDefaultsStore();
+const pinStore = createParentPinStore();
 
 const app = document.getElementById("app");
 
@@ -56,6 +58,7 @@ async function openEntry(): Promise<void> {
     const result = await openParentEntry(document.body, {
       initialSetup: applyDefaults(defaultsStore.load()),
       sessionActive: engine.isActive(Date.now()),
+      pin: pinStore,
     });
     if (result.action === "start") {
       engine.startSession(result.config, Date.now());
@@ -106,14 +109,20 @@ function mountHoldTarget(): HoldCue {
     top: "0",
     right: "0",
     width: "168px",
-    height: "96px",
+    height: "132px",
     zIndex: "10",
     touchAction: "none",
     background: "transparent",
     display: "flex",
-    alignItems: "center",
+    // Sit the cue just below the status bar / Dynamic Island rather than
+    // centred in the box, so it is never hidden behind the island and stays
+    // reachable in portrait on a notched phone as well as landscape on iPad.
+    // The safe-area insets are zero on non-notched devices, where the small
+    // floor keeps the cue clear of a normal status bar.
+    alignItems: "flex-start",
     justifyContent: "flex-end",
-    paddingRight: "18px",
+    paddingTop: "max(env(safe-area-inset-top, 0px), 10px)",
+    paddingRight: "max(env(safe-area-inset-right, 0px), 18px)",
     boxSizing: "border-box",
     cursor: "pointer",
     userSelect: "none",
@@ -206,12 +215,20 @@ function mountHoldTarget(): HoldCue {
   const setArc = (progress: number): void => {
     arc.setAttribute("stroke-dashoffset", String(CIRC * (1 - progress)));
   };
+  // pointerdown forces the cue visible for hold feedback; when the hold ends we
+  // must return it to the visibility its resting state dictates. Without this the
+  // cue stays lit after a hold *during* a session, since nothing else hides it
+  // again until the next session boundary.
+  const settleCueOpacity = (): void => {
+    cue.style.opacity = resting ? "1" : "0";
+  };
   const stopHold = (): void => {
     if (holdRaf !== 0) {
       window.cancelAnimationFrame(holdRaf);
       holdRaf = 0;
     }
     setArc(0);
+    settleCueOpacity();
     if (resting) startPulse();
   };
   const tickHold = (nowMs: number): void => {
@@ -220,6 +237,7 @@ function mountHoldTarget(): HoldCue {
     if (progress >= 1) {
       holdRaf = 0;
       setArc(0);
+      settleCueOpacity();
       void openEntry();
       return;
     }

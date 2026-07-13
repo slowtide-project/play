@@ -8,7 +8,7 @@
  * budget, so the whole box winds down together.
  */
 
-import type { Toy, ToyFrame, ToyPointer } from "../render/index.js";
+import type { SafeInsets, Toy, ToyFrame, ToyPointer } from "../render/index.js";
 import { createMenu, type WorldEntry } from "./menu.js";
 import { createForestWorld } from "./forest-world.js";
 
@@ -38,14 +38,27 @@ const WORLDS: readonly WorldEntry[] = [
 const HOME_R = 30;
 const HOME_C = 46;
 const HAS_MENU = WORLDS.length > 1;
+const ZERO_INSETS: SafeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
-function drawHome(ctx: CanvasRenderingContext2D): void {
+/**
+ * Where the home pebble's centre sits: the default corner offset, pushed in by
+ * the safe-area insets so it always clears the Dynamic Island / status bar in
+ * portrait rather than hiding behind it (the scene behind it stays full-bleed).
+ */
+function homeCentre(insets: SafeInsets): { cx: number; cy: number } {
+  return {
+    cx: Math.max(HOME_C, insets.left + HOME_R + 8),
+    cy: Math.max(HOME_C, insets.top + HOME_R + 8),
+  };
+}
+
+function drawHome(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.3)";
   ctx.shadowBlur = 10;
   ctx.fillStyle = "rgba(247,244,238,0.92)";
   ctx.beginPath();
-  ctx.arc(HOME_C, HOME_C, HOME_R, 0, Math.PI * 2);
+  ctx.arc(cx, cy, HOME_R, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
   const dot = HOME_R * 0.24;
@@ -62,7 +75,7 @@ function drawHome(ctx: CanvasRenderingContext2D): void {
     if (spot === undefined) continue;
     ctx.fillStyle = colours[i] ?? "#333";
     ctx.beginPath();
-    ctx.arc(HOME_C + spot[0], HOME_C + spot[1], dot, 0, Math.PI * 2);
+    ctx.arc(cx + spot[0], cy + spot[1], dot, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -72,6 +85,9 @@ export function createToyBox(): Toy {
   let height = 0;
   let current = "menu";
   let active: Toy | null = null;
+  // Latest safe-area insets seen on draw, so the home pebble's hit area matches
+  // where it is painted (draw runs before pointer handling).
+  let insets: SafeInsets = ZERO_INSETS;
 
   function open(id: string): void {
     const entry = WORLDS.find((w) => w.id === id);
@@ -113,8 +129,9 @@ export function createToyBox(): Toy {
         return;
       }
       if (HAS_MENU && pointer.type === "down") {
-        const dx = pointer.x - HOME_C;
-        const dy = pointer.y - HOME_C;
+        const { cx, cy } = homeCentre(insets);
+        const dx = pointer.x - cx;
+        const dy = pointer.y - cy;
         if (dx * dx + dy * dy <= (HOME_R + 6) * (HOME_R + 6)) {
           active = null;
           current = "menu";
@@ -127,12 +144,16 @@ export function createToyBox(): Toy {
     draw(frame: ToyFrame) {
       width = frame.width;
       height = frame.height;
+      insets = frame.safeInsets ?? ZERO_INSETS;
       if (current === "menu" || active === null) {
         menu.draw(frame);
         return;
       }
       active.draw(frame);
-      if (HAS_MENU) drawHome(frame.ctx);
+      if (HAS_MENU) {
+        const { cx, cy } = homeCentre(insets);
+        drawHome(frame.ctx, cx, cy);
+      }
     },
   };
 }
